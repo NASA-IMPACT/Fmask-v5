@@ -4,16 +4,16 @@ import sys
 from pathlib import Path
 from typing import Union
 import pandas as pd
-from satellite import Landsat, Sentinel2
-from phylib import flood_fill_shadow
-import predictor as P
-import utils
-from unetlib import UNet
-from lightgbmlib import Dataset as PixeDataset
-from lightgbmlib import LightGBM
-import constant as C
-from phylib import Physical, segment_cloud_objects
-from bitlib import BitLayer
+from .satellite import Landsat, Sentinel2
+from .phylib import flood_fill_shadow
+from . import predictor as P
+from . import utils
+from .unetlib import UNet
+from .lightgbmlib import Dataset as PixeDataset
+from .lightgbmlib import LightGBM
+from . import constant as C
+from .phylib import Physical, segment_cloud_objects
+from .bitlib import BitLayer
 import numpy as np
 from skimage.filters import threshold_otsu
 np.seterr(invalid='ignore') # ignore the invalid errors
@@ -1587,7 +1587,7 @@ class Fmask(object):
         - None
         """
         # set the package directory, which is the parent directory of the current file, as the root, to access the base pre-trained models
-        self.dir_package = Path(__file__).parent.parent
+        self.dir_package = Path(__file__).parent.parent.parent
 
        # Initialize image object containing base information on this image
         image_name = Path(image_path).stem

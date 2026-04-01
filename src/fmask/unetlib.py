@@ -12,9 +12,9 @@ from torch import from_numpy
 from torch.utils.data import DataLoader, Dataset as BaseDataset
 import segmentation_models_pytorch as smp
 from pathlib import Path
-from utils import normalize_datacube, init_patch_offanchors
+from .utils import normalize_datacube, init_patch_offanchors
 import time
-import constant as C
+from . import constant as C
 np.seterr(invalid='ignore') # ignore the invalid errors
 
 

@@ -36,15 +36,10 @@ Changelog:
 
 
 import os
-import sys
 from pathlib import Path
 import click
 import glob
-from pathlib import Path
-sys.path.append(
-    str(Path(__file__).parent.parent.joinpath("src"))
-)
-from fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lpl,  fmask_lpu, fmask_upl, fmask_upu
+from .fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lpl,  fmask_lpu, fmask_upl, fmask_upu
 
 @click.command()
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")

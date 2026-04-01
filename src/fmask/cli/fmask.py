@@ -72,14 +72,9 @@ Changelog:
 """
 
 import os
-import sys
-from pathlib import Path
 import time
 import click
-sys.path.append(
-    str(Path(__file__).parent.parent.joinpath("src"))
-)
-from fmasklib import Fmask
+from fmask.fmasklib import Fmask
 
 
 # Version of the Fmask algorithm
