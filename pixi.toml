@@ -1,0 +1,30 @@
+[workspace]
+name = "fmask"
+version = "5.0.1"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64"]
+
+[dependencies]
+python = ">=3.10"
+gdal = "*"
+rasterio = "*"
+numpy = "*"
+scipy = "*"
+pandas = "*"
+scikit-image = "*"
+scikit-learn = "*"
+pytorch = "*"
+matplotlib = "*"
+plotly = "*"
+nbformat = "*"
+pyproj = "*"
+click = "*"
+lxml = "*"
+geopandas = "*"
+lightgbm = "*"
+utm = "*"
+
+[pypi-dependencies]
+fmask = { path = ".", editable = true }
+patchify = "*"
+segmentation-models-pytorch = "*"
