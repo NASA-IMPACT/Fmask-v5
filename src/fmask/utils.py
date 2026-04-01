@@ -30,7 +30,7 @@ from skimage.morphology import binary_dilation, binary_erosion, reconstruction
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
-import constant as C
+from . import constant as C
 from scipy.ndimage import convolve
 
 # ignore the invalid errors
@@ -337,7 +337,7 @@ def gen_dem(profile, des=None):
     """
     if C.MSG_FULL:
         print(">>> loading dem from gtopo30")
-    path_dem = os.path.join(Path(__file__).parent.parent, "data", "global_gt30.tif")
+    path_dem = os.path.join(Path(__file__).parent.parent.parent, "data", "global_gt30.tif")
     return warp2like(src=path_dem, like=profile, des=des)
 
 def gen_slope(profile, des=None):
@@ -353,7 +353,7 @@ def gen_slope(profile, des=None):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-slope")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_slope.tif"), like=profile, des=des)/100
+    return warp2like(src=os.path.join(Path(__file__).parent.parent.parent, "data", "global_gt30_slope.tif"), like=profile, des=des)/100
 
 def gen_aspect(profile, des=None):
     """
@@ -367,7 +367,7 @@ def gen_aspect(profile, des=None):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-aspect")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_aspect.tif"), like=profile, des=des)/100
+    return warp2like(src=os.path.join(Path(__file__).parent.parent.parent, "data", "global_gt30_aspect.tif"), like=profile, des=des)/100
     
 
 def gen_gswo(profile, des=None):
@@ -392,7 +392,7 @@ def gen_gswo(profile, des=None):
         print(">>> loading gswo")
     # Note: this function only works on the gobal layer in the package, which was produced by create_global_gswo150.py
     # check the image is within the global water layer, 78, -59
-    path_gswo = os.path.join(Path(__file__).parent.parent, "data", "global_gswo150.tif")
+    path_gswo = os.path.join(Path(__file__).parent.parent.parent, "data", "global_gswo150.tif")
     swo = warp2like(src=path_gswo, like=profile, des=des)
     if swo is not None:
         swo[swo == 255] = 100  # 255 is 100% ocean.

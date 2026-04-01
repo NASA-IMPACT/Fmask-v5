@@ -3,9 +3,9 @@
 import numpy as np
 import copy
 import pandas
-import constant as C
-from satellite import Data
-import utils
+from . import constant as C
+from .satellite import Data
+from . import utils
 from scipy.ndimage.filters import uniform_filter
 from sklearn.linear_model import LinearRegression
 from skimage.measure import label, regionprops
