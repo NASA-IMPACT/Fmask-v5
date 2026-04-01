@@ -187,3 +187,8 @@ cython_debug/
 # Large ancillary data files — download via: fmask-data install <zip>
 data/
 model/
+
+# conda build artifacts
+*.conda
+*.tar.bz2
+output/
