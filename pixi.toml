@@ -23,8 +23,7 @@ lxml = "*"
 geopandas = "*"
 lightgbm = "*"
 utm = "*"
+segmentation-models-pytorch = "*"
 
 [pypi-dependencies]
 fmask = { path = ".", editable = true }
-patchify = "*"
-segmentation-models-pytorch = "*"
