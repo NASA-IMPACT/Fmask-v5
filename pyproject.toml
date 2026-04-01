@@ -18,7 +18,6 @@ dependencies = [
     "nbformat",
     "numpy",
     "pandas",
-    "patchify",
     "plotly",
     "pyproj",
     "rasterio",
