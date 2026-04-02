@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Author: Shi Qiu, Zhe Zhu
 Email: shi.qiu@uconn.edu, zhe@uconn.edu
