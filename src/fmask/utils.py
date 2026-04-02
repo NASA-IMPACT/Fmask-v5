@@ -1173,7 +1173,7 @@ def normalize_image(image, **kwargs):
         image_valid = image[np.where(obsmask)].astype("float")
 
     [min_val, max_val] = np.percentile(
-        image_valid, percentile_range, interpolation="linear"
+        image_valid, percentile_range, method="linear"
     )
     # normal_minmax_range = [min_val, max_val]
     # rescale

@@ -16,7 +16,7 @@ dependencies = [
     "lxml",
     "matplotlib",
     "nbformat",
-    "numpy",
+    "numpy>=1.22",
     "pandas",
     "plotly",
     "pyproj",
