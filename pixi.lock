@@ -1536,7 +1536,7 @@ packages:
 - pypi: ./
   name: fmask
   version: 5.0.1
-  sha256: f25c13f9405a12233ed836a23c4f7001b463446d72385051cdde1b4e606d6e3e
+  sha256: 46a4ffc02c0bfbc71bab2ae243f47ac39a137523fb28ca2b61543c848d16123c
   requires_dist:
   - click
   - gdal
@@ -1545,7 +1545,7 @@ packages:
   - lxml
   - matplotlib
   - nbformat
-  - numpy
+  - numpy>=1.22
   - pandas
   - plotly
   - pyproj
