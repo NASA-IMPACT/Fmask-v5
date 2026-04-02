@@ -2,6 +2,8 @@ import importlib as _importlib
 import sys as _sys
 from importlib.machinery import ModuleSpec as _ModuleSpec
 
+from ._paths import FMASK_DATA_ENV, get_data_root
+
 __version__ = "5.0.1"
 
 # ---------------------------------------------------------------------------

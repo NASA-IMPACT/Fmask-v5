@@ -12,6 +12,7 @@ from .unetlib import UNet
 from .lightgbmlib import Dataset as PixeDataset
 from .lightgbmlib import LightGBM
 from . import constant as C
+from ._paths import get_data_root as _get_data_root
 from .phylib import Physical, segment_cloud_objects
 from .bitlib import BitLayer
 import numpy as np
@@ -1586,8 +1587,8 @@ class Fmask(object):
         Returns:
         - None
         """
-        # set the package directory, which is the parent directory of the current file, as the root, to access the base pre-trained models
-        self.dir_package = Path(__file__).parent.parent.parent
+        # set the package directory as the root for accessing base pre-trained models
+        self.dir_package = _get_data_root()
 
        # Initialize image object containing base information on this image
         image_name = Path(image_path).stem

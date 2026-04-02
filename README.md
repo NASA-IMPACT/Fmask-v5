@@ -82,8 +82,19 @@ The models and auxiliary rasters (~3 GB) are distributed separately via the
 fmask-data install /path/to/fmask_5_0_1.zip
 ```
 
-This extracts `data/` and `model/` into the correct location automatically.
-Run `fmask-data install --help` to see where files will be placed.
+This extracts `data/` and `model/` into the `fmask` package directory by
+default, which is the expected location for a normal install.
+
+To install the ancillary data to a custom location (e.g. a shared filesystem),
+set the `FMASK_DATA` environment variable before running:
+
+```bash
+export FMASK_DATA=/shared/fmask_data
+fmask-data install /path/to/fmask_5_0_1.zip
+```
+
+Any subsequent `fmask` commands will pick up `FMASK_DATA` automatically.
+Run `fmask-data install --help` to see all options.
 
 ## Running Fmask
 To apply Fmask-UPL on a single Landsat 8-9 image (recommended cloud dilation: 1 pixel):
