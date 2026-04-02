@@ -62,7 +62,30 @@ pip install git+https://github.com/gersl/fmask
 > **Note:** `gdal` can be difficult to install via pip on some platforms.
 > If installation fails, use the pixi method above or install GDAL system-wide first.
 
-### Option 3 — complete ZIP (no git required)
+### Option 3 — conda package via pixi workspace
+
+If your project uses [pixi](https://pixi.sh), you can reference this repository
+directly as a conda source dependency. pixi will build the package automatically
+from the included `recipe/recipe.yaml`:
+
+```toml
+# your-project/pixi.toml
+[dependencies]
+fmask = { path = "../fmask" }        # local clone
+# or from git source:
+# fmask = { git = "https://github.com/gersl/fmask" }
+```
+
+To build the conda package manually (e.g. for distribution or CI):
+
+```bash
+pixi build --path recipe/
+```
+
+This produces a `fmask-5.0.1-*.conda` artifact in the project root that can be
+used as a local channel or attached to a release.
+
+### Option 4 — complete ZIP (no git required)
 
 Download the complete package from the [Complete Package](#complete-package) section above.
 It includes all source code, models, and auxiliary data in one archive.
@@ -73,7 +96,7 @@ cd fmask
 pixi install
 ```
 
-### Ancillary data (Options 1 and 2 only)
+### Ancillary data (Options 1, 2, and 3 only)
 
 The models and auxiliary rasters (~3 GB) are distributed separately via the
 [Complete Package](#complete-package) ZIP. After installing via git, run:
