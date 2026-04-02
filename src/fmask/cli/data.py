@@ -2,7 +2,7 @@
 
 The expected layout on disk mirrors the SharePoint distribution ZIP:
 
-    <project-root>/
+    <data-root>/
         data/
             global_gt30.tif
             global_gt30_slope.tif
@@ -18,8 +18,11 @@ The expected layout on disk mirrors the SharePoint distribution ZIP:
             unet_cloud_l8.pt
             unet_cloud_l7.pt
             unet_cloud_s2.pt
-        src/
-            ...
+
+The data root is resolved by ``fmask._paths.get_data_root()``:
+
+1. The ``FMASK_DATA`` environment variable (if set).
+2. The ``fmask`` package directory (default for normal installs).
 
 Use ``fmask-data install`` to extract ``data/`` and ``model/`` from the
 downloaded ZIP, and ``fmask-data pack`` to recreate a compatible ZIP for
@@ -30,11 +33,7 @@ import zipfile
 from pathlib import Path
 
 import click
-import fmask
-
-# Mirrors the resolution in utils.py and fmasklib.py:
-#   src/fmask/__init__.py -> src/fmask/ -> src/ -> <project-root>
-_PROJECT_ROOT = Path(fmask.__file__).parent.parent.parent
+from fmask._paths import get_data_root, FMASK_DATA_ENV
 
 _DATA_DIRS = ("data", "model")
 
@@ -49,9 +48,9 @@ def main():
 @click.option(
     "--dest",
     type=click.Path(file_okay=False, path_type=Path),
-    default=_PROJECT_ROOT,
+    default=get_data_root,
     show_default=True,
-    help="Root directory to extract into.",
+    help=f"Root directory to extract into (override with ${FMASK_DATA_ENV}).",
 )
 def install(zip_path, dest):
     """Extract data/ and model/ from the Fmask distribution ZIP.
@@ -103,9 +102,9 @@ def install(zip_path, dest):
 @click.option(
     "--source",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    default=_PROJECT_ROOT,
+    default=get_data_root,
     show_default=True,
-    help="Root directory containing data/ and model/.",
+    help=f"Root directory containing data/ and model/ (override with ${FMASK_DATA_ENV}).",
 )
 def pack(output, source):
     """Create a ZIP of data/ and model/ for redistribution.
