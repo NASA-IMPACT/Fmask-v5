@@ -42,42 +42,63 @@ Figure 2: Flowchart of physics-informed machine learning (PIML) for cloud detect
 
 # How to Use
 ## Installation
-### Create python environment with version 3.9 from (Mini) Conda
-- conda create -n fmask python=3.10
-### Activate the python environment
-- conda activate fmask
-### Configure dependent packages (The packages listed below were used for testing and may not all be required)
-- conda install rasterio gdal -y
-- pip install -U segmentation-models-pytorch
-- pip install plotly
-- pip install --upgrade nbformat  # for the plotly
-- pip install patchify
-- conda install lxml -y
-- pip install pandas
-- pip install geopandas
-- pip install -U scikit-learn
-- conda install scipy -y
-- conda install scikit-image -y
-- conda install matplotlib -y
-- pip install pyproj 
-- pip install utm
-- pip install lightgbm
-- pip install click
 
-## Running Fmask from the `main` Folder
+### Option 1 — pixi (recommended)
+
+[pixi](https://pixi.sh) manages all conda and PyPI dependencies in one step.
+
+```bash
+git clone https://github.com/gersl/fmask
+cd fmask
+pixi install
+```
+
+### Option 2 — uv / pip
+
+```bash
+pip install git+https://github.com/gersl/fmask
+```
+
+> **Note:** `gdal` can be difficult to install via pip on some platforms.
+> If installation fails, use the pixi method above or install GDAL system-wide first.
+
+### Option 3 — complete ZIP (no git required)
+
+Download the complete package from the [Complete Package](#complete-package) section above.
+It includes all source code, models, and auxiliary data in one archive.
+
+```bash
+unzip fmask_5_0_1.zip
+cd fmask
+pixi install
+```
+
+### Ancillary data (Options 1 and 2 only)
+
+The models and auxiliary rasters (~3 GB) are distributed separately via the
+[Complete Package](#complete-package) ZIP. After installing via git, run:
+
+```bash
+fmask-data install /path/to/fmask_5_0_1.zip
+```
+
+This extracts `data/` and `model/` into the correct location automatically.
+Run `fmask-data install --help` to see where files will be placed.
+
+## Running Fmask
 To apply Fmask-UPL on a single Landsat 8-9 image (recommended cloud dilation: 1 pixel):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_landsat8-9 --model UPL --dcloud=1
+fmask --imagepath /path/to/image_directory_landsat8-9 --model UPL --dcloud=1
 ```
 
 To apply Fmask-UPL on a single Sentinel-2 image (recommended cloud dilation: 0 pixels):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud 0
+fmask --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud 0
 ```
 
 To apply Fmask-LPL on a single Landsat 4-7 image (recommended cloud dilation: 1 pixel):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
+fmask --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
 ```
 
 ## 🛠️ Command-Line Options
