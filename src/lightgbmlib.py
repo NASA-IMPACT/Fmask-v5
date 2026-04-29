@@ -554,9 +554,9 @@ class LightGBM(object):
             sample_image_col = sample_image_col_all[idx:idx_end]
             if point_predictors: # image-based predictors + latitude + longitude
                 n_pixels = len(sample_image_row)
-                pro_pred = self.model.predict_proba((np.concatenate((self.image.data.get(image_predictors)[:, sample_image_row, sample_image_col], np.full((1, n_pixels), self.image.lat_center, dtype=np.float32), np.full((1, n_pixels), self.image.lon_center, dtype=np.float32)), axis=0)).T)
+                pro_pred = self.model.predict_proba((np.concatenate((self.image.data.get(image_predictors)[:, sample_image_row, sample_image_col], np.full((1, n_pixels), self.image.lat_center, dtype=np.float32), np.full((1, n_pixels), self.image.lon_center, dtype=np.float32)), axis=0)).T, n_jobs=0)
             else: # only image-based predictors
-                pro_pred = self.model.predict_proba((self.image.data.get(image_predictors)[:,sample_image_row, sample_image_col]).T)
+                pro_pred = self.model.predict_proba((self.image.data.get(image_predictors)[:,sample_image_row, sample_image_col]).T, n_jobs=0)
             
             label_pred = labs_model[np.argmax(pro_pred, axis=1)]
 
