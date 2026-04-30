@@ -233,7 +233,15 @@ Each pixel is classified with one of the following values:
 > **Note:** Water and snow/ice pixels are labeled solely to enhance cloud detection. Their detection accuracy has not been evaluated.
 
 ### Computing Efficiency
-TBD
+
+Fmask's LightGBM inference (and local retraining) and PyTorch CPU inference both respect the `OMP_NUM_THREADS` environment variable. Set it to match the number of vCPUs available:
+
+```bash
+export OMP_NUM_THREADS=4
+fmask --imagepath /path/to/image --model UPL
+```
+
+If `OMP_NUM_THREADS` is not set, LightGBM defaults to using all physical cores. When running on GPU (CUDA or Apple MPS), PyTorch inference is unaffected by this variable.
 
 ### Global Validation Dataset
 The global validation samples are available at [this link](https://uconn-my.sharepoint.com/:x:/g/personal/shi_qiu_uconn_edu/IQCOGXrB23p-SLBu0exv5WJBAS71rzu1JA8IsvZxC_tM7Gg?e=fVkXH6).
