@@ -425,7 +425,7 @@ class LightGBM(object):
                                    min_data_in_leaf = self.min_data_in_leaf,
                                    n_estimators=self.ntrees,
                                    random_state = C.RANDOM_SEED,
-                                   n_jobs  = 1, # only use 1 core to process, since we can use parallel processing for each individual image
+                                   n_jobs  = 0, # thread count follows OMP_NUM_THREADS; defaults to all physical cores if unset
                                    verbose = -1) # no verbose, do not show the warnings in the progress
     
         if (
