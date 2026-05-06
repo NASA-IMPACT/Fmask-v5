@@ -20,6 +20,8 @@ conda activate fmask
 echo $SLURMD_NODENAME # display the node name
 cd ../
 
+# Set LightGBM and other programs to use threadcount equal to CPUs for task
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 DCLOUD=3
 DSHADOW=5
