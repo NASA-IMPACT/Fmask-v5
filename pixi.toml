@@ -4,6 +4,7 @@ version = "5.0.1"
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]
 preview = ["pixi-build"]
+conda-pypi-map = { "conda-forge" = "conda-pypi-map.json" }
 
 [dependencies]
 python = ">=3.10"
@@ -13,8 +14,10 @@ rasterio = "*"
 numpy = ">=1.22"
 scipy = "*"
 pandas = "*"
-scikit-image = "*"
-scikit-learn = "*"
+# binary_dilation will be removed in 0.28
+scikit-image = ">=0.25,<0.28"
+# Pin for compatibility with pre-saved model pickles
+scikit-learn = "==1.1.2"
 pytorch = "*"
 matplotlib = "*"
 plotly = "*"

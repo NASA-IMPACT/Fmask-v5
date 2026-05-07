@@ -22,7 +22,8 @@ dependencies = [
     "pyproj",
     "rasterio",
     "scikit-image",
-    "scikit-learn",
+    # Pin for compatibility with pre-saved model pickles
+    "scikit-learn>=1.1.2,<1.2",
     "scipy",
     "segmentation-models-pytorch",
     "torch",
