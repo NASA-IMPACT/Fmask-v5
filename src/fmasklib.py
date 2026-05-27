@@ -531,7 +531,7 @@ class Fmask(object):
         self.cloud = BitLayer(self.image.shape)
         self.cloud.append(self.physical.pcp)
 
-    def mask_shadow(self, postprocess, min_area = 3, dilation_spectral_size = 0, dilation_spectral_region = 'outside', buffer2connect = 3, potential = "flood", topo="SCS", thermal_adjust = True, threshold = 0.2):
+    def mask_shadow(self, postprocess, min_area = 3, dilation_spectral_size = 23, dilation_spectral_region = 'outside', buffer2connect = 3, potential = "flood", topo="SCS", thermal_adjust = True, threshold = 0.2):
         """
         Masks the shadow in the image based on the given parameters.
         Parameters:
