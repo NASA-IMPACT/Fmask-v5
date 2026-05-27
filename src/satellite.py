@@ -98,6 +98,23 @@ class Data:
             else:
                 return None
     
+    def drop(self, band):
+        """
+        Drop the specified band from the satellite data.
+
+        Args:
+            band (str): The name of the band to drop.
+        """
+        if isinstance(band, list):
+            indices_to_drop = [self.bands.index(pred) for pred in band]
+            self.data = np.delete(self.data, indices_to_drop, axis=0)
+            self.bands = [b for b in self.bands if b not in band]
+        else:
+            if band in self.bands:
+                index_to_drop = self.bands.index(band)
+                self.data = np.delete(self.data, index_to_drop, axis=0)
+                self.bands.remove(band)
+    
     def copyget(self, band):
         """
         Returns the data for the specified band by deep copy(), in array, xx.copy()
@@ -355,12 +372,13 @@ class Satellite:
         if band == "red":
             return self.saturation.get(2)
     
-    def load_data(self, predictors):
+    def load_data(self, predictors,nthreads=1):
         """
         Loads the data for the satellite.
 
         Args:
             predictors (list): A list of predictor variables.
+            nthreads (int): Number of threads to use for loading data.
 
         Raises:
             NotImplementedError: This method must be implemented in a subclass.
@@ -601,12 +619,13 @@ class Landsat(Satellite):
             image = np.deg2rad(image)
         return image
 
-    def read_datacube(self, predictors, maskupdate=True):
+    def read_datacube(self, predictors, maskupdate=True, nthreads=1):
         """read all bands defined by predictors
 
         Args:
             predictors (list): List of band name
             maskupdate (bool, optional): Control to update the observation mask or not. Defaults to True.
+            nthreads (int, optional): Number of threads to use for loading data. Defaults to 1.
 
         Returns:
             list and 3d array: the list of band name and the datacube
@@ -744,7 +763,7 @@ class Landsat(Satellite):
         # surface data
         predictor = "dem"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = gen_dem(self.profile).astype(
+            bands[predictors.index(predictor), :, :] = gen_dem(self.profile, nthreads=nthreads).astype(
                 np.float32
             )
         predictor = "swo"
@@ -754,15 +773,15 @@ class Landsat(Satellite):
                 self.lat_south >= C.SOUTH_LAT_GSWO
             ):
                 bands[predictors.index(predictor), :, :] = gen_gswo(
-                    self.profile
+                    self.profile, nthreads=nthreads
                 ).astype(np.float32)
             # default value will be zero still, which will not used in the water mask
 
         # Convert all pixels out of the observation mask to zero
         # according to self.obsmask, change pixel values out of extent to be zero
         if self.obsmask is not None:
-            bands[:, ~self.obsmask] = 0  # This flattens mask, not recommended for high-D arrays
-
+            # bands[:, ~self.obsmask] = 0  # This flattens mask, not recommended for high-D arrays
+            bands *= self.obsmask[None, :, :]  # This keeps the original shape, recommended for high-D arrays
         # Fix the pixels in error
         # check any nan values in the bands
         if np.any(np.isnan(bands)):
@@ -770,19 +789,20 @@ class Landsat(Satellite):
         # return the band name and data
         return Data(bands, predictors), statu
 
-    def load_data(self, predictors):
+    def load_data(self, predictors, nthreads=1):
         """
         Reads the dataset for the satellite.
 
         Args:
             predictors (list): A list of predictors to be read.
+            nthreads (int): Number of threads to use for loading data.
 
         Returns:
             tuple: A tuple containing the datacube and the saturation values.
 
         """
 
-        self.data, self.saturation = self.read_datacube(predictors)
+        self.data, self.saturation = self.read_datacube(predictors, nthreads=nthreads)
 
 
     def __init__(self, folder):
@@ -1077,13 +1097,14 @@ class Sentinel2(Satellite):
             image = np.deg2rad(image)
         return image
 
-    def read_datacube(self, predictors, maskupdate=True):
+    def read_datacube(self, predictors, maskupdate=True, nthreads=1):
         """
         Reads the data cube for the given predictors.
 
         Args:
             predictors (list): List of predictor names.
             maskupdate (bool, optional): Whether to update the mask. Defaults to True.
+            nthreads (int, optional): Number of threads to use for loading data. Defaults to 1.
 
         Returns:
             tuple: A tuple containing the data cube and the saturation mask.
@@ -1243,7 +1264,7 @@ class Sentinel2(Satellite):
         # surface data
         predictor = "dem"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = gen_dem(self.profile).astype(
+            bands[predictors.index(predictor), :, :] = gen_dem(self.profile, nthreads=nthreads).astype(
                 np.float32
             )
         predictor = "swo"
@@ -1253,15 +1274,15 @@ class Sentinel2(Satellite):
                 self.lat_south >= C.SOUTH_LAT_GSWO
             ):
                 bands[predictors.index(predictor), :, :] = gen_gswo(
-                    self.profile
+                    self.profile, nthreads=nthreads
                 ).astype(np.float32)
             # default value will be zero still, which will not used in the water mask
         
         # Convert all pixels out of the observation mask to zero
         # according to self.obsmask, change pixel values out of extent to be zero
         if self.obsmask is not None:
-            bands[:, ~self.obsmask] = 0  # This flattens mask, not recommended for high-D arrays
-
+            #bands[:, ~self.obsmask] = 0  # This flattens mask, not recommended for high-D arrays
+            bands *= self.obsmask[None, :, :]  # This keeps the original shape, recommended for high-D arrays
         # Fix the pixels in error
         if np.any(np.isnan(bands)):
             bands = np.nan_to_num(bands, nan=C.EPS, posinf=C.EPS, neginf=C.EPS)
@@ -1269,19 +1290,20 @@ class Sentinel2(Satellite):
         # return the band name and data
         return Data(bands, predictors), statu
 
-    def load_data(self, predictors):
+    def load_data(self, predictors, nthreads=1):
         """
         Reads the dataset for the satellite.
 
         Args:
             predictors (list): A list of predictors to be read.
+            nthreads (int): Number of threads to use for loading data.
 
         Returns:
             tuple: A tuple containing the datacube and the saturation values.
 
         """
         # read saturate qa for visible bands
-        self.data, self.saturation = self.read_datacube(predictors)
+        self.data, self.saturation = self.read_datacube(predictors, nthreads=nthreads)
 
     def __init__(self, folder):
         # base class init

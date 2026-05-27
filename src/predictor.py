@@ -232,4 +232,5 @@ s2_predictor_shadow_cnn = [
     "dem",
 ]  # predictors for shadow CNN model
 
+predictor_shadow = ["nir", "swir1", "dem"]  # predictors of flood-filled potential shadow masking
 # End of the script

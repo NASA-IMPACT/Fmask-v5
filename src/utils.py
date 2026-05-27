@@ -45,12 +45,14 @@ def is_running_in_jupyter():
         return get_ipython() is not None
     except ImportError:
         return False
-if is_running_in_jupyter():
-    # mpl.use('TkAgg')
-    pass
-else:
-    mpl.use('Agg')
-
+# if is_running_in_jupyter():
+#     # mpl.use('TkAgg')
+#     pass
+# else:
+#     mpl.use('Agg')
+# Use environment-based detection (no IPython import):
+# if os.environ.get("DISPLAY", "") == "":
+#     mpl.use("Agg")  # headless
 
 # Functions of index calculationg
 def ndvi(red, nir):
@@ -223,7 +225,7 @@ def variation(nir, radius=5):
     )  # convert to int from float to avoid the warning from local_binary_pattern
 
 #%% Functions of processing the raster data
-def warp2like(src, like, des=None):
+def warp2like(src, like, des=None, nthreads=1):
     """
     Warp the imagery to match the extent and resolution of the like-data.
 
@@ -286,6 +288,7 @@ def warp2like(src, like, des=None):
                         dst_crs=des_profile["crs"],
                         resampling=warp.Resampling.nearest,
                         dst_nodata=src_mask.nodata,
+                        num_threads=nthreads,
                     )
         else:
             # return the 2d-array
@@ -304,6 +307,7 @@ def warp2like(src, like, des=None):
                     dst_crs=des_profile["crs"],
                     resampling=warp.Resampling.nearest,
                     dst_nodata=src_mask.nodata,
+                    num_threads=nthreads,
                 )
             elif src_mask.count > 1:
                 # also support multiple bands
@@ -321,10 +325,11 @@ def warp2like(src, like, des=None):
                         dst_crs=des_profile["crs"],
                         resampling=warp.Resampling.nearest,
                         dst_nodata=des_profile["nodata"],
+                        num_threads=nthreads,
                     )
             return dst_mask
 
-def gen_dem(profile, des=None):
+def gen_dem(profile, des=None, nthreads=1):
     """
     Generate a digital elevation model (DEM) using gtopo30 data.
 
@@ -338,9 +343,9 @@ def gen_dem(profile, des=None):
     if C.MSG_FULL:
         print(">>> loading dem from gtopo30")
     path_dem = os.path.join(Path(__file__).parent.parent, "data", "global_gt30.tif")
-    return warp2like(src=path_dem, like=profile, des=des)
+    return warp2like(src=path_dem, like=profile, des=des, nthreads=nthreads)
 
-def gen_slope(profile, des=None):
+def gen_slope(profile, des=None, nthreads=1):
     """
     Generate a slope raster based on the given profile.
     This function loads a global slope dataset (gtopo30-slope) and warps it to match the given profile.
@@ -353,9 +358,9 @@ def gen_slope(profile, des=None):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-slope")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_slope.tif"), like=profile, des=des)/100
+    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_slope.tif"), like=profile, des=des, nthreads=nthreads)/100
 
-def gen_aspect(profile, des=None):
+def gen_aspect(profile, des=None, nthreads=1):
     """
     Generates an aspect raster that matches the given profile.
     Parameters:
@@ -367,16 +372,17 @@ def gen_aspect(profile, des=None):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-aspect")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_aspect.tif"), like=profile, des=des)/100
+    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_aspect.tif"), like=profile, des=des, nthreads=nthreads)/100
     
 
-def gen_gswo(profile, des=None):
+def gen_gswo(profile, des=None, nthreads=1):
     """
     Generate a global surface water mask.
 
     Args:
         profile (dict): The profile of the input raster.
         des (str, optional): The destination path for the generated surface water mask. Defaults to None.
+        nthreads (int, optional): The number of threads to use for warping. Defaults to 1.
 
     Returns:
         numpy.ndarray: The generated surface water mask.
@@ -393,7 +399,7 @@ def gen_gswo(profile, des=None):
     # Note: this function only works on the gobal layer in the package, which was produced by create_global_gswo150.py
     # check the image is within the global water layer, 78, -59
     path_gswo = os.path.join(Path(__file__).parent.parent, "data", "global_gswo150.tif")
-    swo = warp2like(src=path_gswo, like=profile, des=des)
+    swo = warp2like(src=path_gswo, like=profile, des=des, nthreads=nthreads)
     if swo is not None:
         swo[swo == 255] = 100  # 255 is 100% ocean.
     return swo
@@ -446,7 +452,19 @@ def topo_correct_scs(band_ori1, band_ori2, sun_elevation_deg, sun_azimuth_deg, s
     else:
         return band_ori1, band_ori2
 
-def erode(mask, radius=3):
+
+def make_disk(radius, smooth=True):
+    """Creates a disk-shaped structuring element for morphological operations.
+    Args:
+    radius (int): The radius of the disk.
+    smooth (bool, optional): If True, the disk will have a smooth boundary. Defaults to False.
+    Returns:    numpy.ndarray: A 2D boolean array representing the disk-shaped structuring element.
+    """
+    y, x = np.ogrid[-radius:radius+1, -radius:radius+1]
+    r = radius + 0.5 if smooth else radius
+    return (x*x + y*y) <= r*r
+
+def erode(mask, radius=3, structure='disk'):
     """
     Erodes the input mask by a given radius.
 
@@ -457,17 +475,22 @@ def erode(mask, radius=3):
     Returns:
         ndarray: Eroded mask.
     """
+    if structure == 'disk':
+        footprint = make_disk(radius)
+    elif structure == 'square':
+        footprint = np.ones((2 * radius + 1, 2 * radius + 1))
     return binary_erosion(
-        mask, footprint=np.ones((2 * radius + 1, 2 * radius + 1)), out=None
+        mask, footprint=footprint, out=None
     )
 
-def dilate(mask, radius=3):
+def dilate(mask, radius=3, structure='disk'):
     """
     Dilates the input mask by a given radius.
 
     Args:
         mask (ndarray): Binary mask to be dilated.
         radius (int, optional): Radius of the dilation. Defaults to 3.
+        structure (str, optional): Shape of the structuring element. Defaults to 'square'. Options are 'square' and 'disk'.
 
     Returns:
         ndarray: Dilated mask.
@@ -475,21 +498,37 @@ def dilate(mask, radius=3):
     #return binary_dilation(
     #    mask, footprint=np.ones((2 * radius + 1, 2 * radius + 1)), out=None
     #)
-    max_step = 10 # too large radius will cost too much time and memory
+    max_step = 23 # too large radius will cost too much time and memory
     if radius <= max_step:
+        if structure == 'disk':
+            footprint = make_disk(radius)
+        elif structure == 'square':
+            footprint = np.ones((2 * radius + 1, 2 * radius + 1))
         return binary_dilation(
-            mask, footprint=np.ones((2 * radius + 1, 2 * radius + 1)), out=None
+            mask, footprint=footprint, out=None
         )
     else:
         # use a larger kernel to speed up the process
         i = 1
         while i < radius:
             current_step = min(max_step, radius - i + 1)
+            
+            if structure == 'disk':
+                footprint = make_disk(current_step)
+            elif structure == 'square':
+                footprint = np.ones((2 * current_step + 1, 2 * current_step + 1))
+                
             mask = binary_dilation(
-                mask, footprint=np.ones((2 * current_step + 1, 2 * current_step + 1)), out=None
+                mask, footprint=footprint, out=None
             )
             i += max_step
         return mask
+
+def propagate(seed, mask):
+    """
+    Propagates the seed values in the mask
+    """
+    return reconstruction(seed, mask=mask).astype(bool)
 
 def imfill(data, obsmask, fill_value=None):
     """
@@ -1167,28 +1206,39 @@ def normalize_image(image, **kwargs):
     percentile_range = kwargs.get("percentiles", [1, 99])
     normal_scale_range = kwargs.get("srange", [-1, 1])
     obsmask = kwargs.get("obsmask", None)
-    if obsmask is None:
-        image_valid = image.astype("float")
-    else:
-        image_valid = image[np.where(obsmask)].astype("float")
 
+    # Convert image to float32 only if needed
+    if image.dtype != np.float32:
+        image = image.astype(np.float32, copy=False)
+
+    if obsmask is None:
+        image_valid = image.ravel()
+    else:
+        image_valid = image[obsmask]
+    
+    # `np.percentile` changed in NumPy version 1.22.0: the "interpolation" argument is now called “method”.
     if np.__version__ >= '1.22.0':
         [min_val, max_val] = np.percentile(
-            image_valid, percentile_range, method='linear'
-        )
+            image_valid, percentile_range, method='linear')
     else:
-        [min_val, max_val] = np.percentile(
-            image_valid, percentile_range, interpolation='linear'
-        )
+        [min_val, max_val] = np.percentile(image_valid, percentile_range, interpolation='linear')
+    del image_valid
+
     # normal_minmax_range = [min_val, max_val]
     # rescale
-    image_scaled = ((image - min_val) / (max_val - min_val + C.EPS)) * (
-        normal_scale_range[1] - normal_scale_range[0]
-    ) + normal_scale_range[0]
+    # image_scaled = ((image - min_val) / (max_val - min_val + C.EPS)) * (
+    #     normal_scale_range[1] - normal_scale_range[0]
+    # ) + normal_scale_range[0]
+    image = image - min_val
+    image /= (max_val - min_val + C.EPS)
+    image *= (normal_scale_range[1] - normal_scale_range[0])
+    image += normal_scale_range[0]
+
     # bounding with the range
-    image_scaled[np.where(image_scaled < normal_scale_range[0])] = normal_scale_range[0]
-    image_scaled[np.where(image_scaled > normal_scale_range[1])] = normal_scale_range[1]
-    return image_scaled
+    image = np.clip(image, normal_scale_range[0], normal_scale_range[1])
+    #image_scaled[np.where(image_scaled < normal_scale_range[0])] = normal_scale_range[0]
+    #image_scaled[np.where(image_scaled > normal_scale_range[1])] = normal_scale_range[1]
+    return image
 
 def normalize_datacube(datacube, **kwargs):
     """
@@ -1565,7 +1615,8 @@ def show_predictor(predictor, mask_filled, title, vrange = [0, 1]):
     else:
         _cloud_prob = predictor.copy()
         _cloud_prob[mask_filled] = np.nan
-        cm = mpl.colormaps.get_cmap("RdYlGn_r")
+        # cm = mpl.colormaps.get_cmap("RdYlGn_r")
+        cm = mpl.colormaps.get_cmap("viridis")
         cm.set_bad(color="#cccccc")  # gray for filled
         c = plt.imshow(_cloud_prob, vmin=vrange[0], vmax=vrange[1], cmap=cm, interpolation="nearest")
         plt.axis("off")
@@ -1590,7 +1641,9 @@ def show_cloud_probability(cloud_prob, mask_filled, title):
     else:
         _cloud_prob = cloud_prob.copy()
         _cloud_prob[mask_filled] = np.nan
-        cm = mpl.colormaps.get_cmap("RdYlGn_r")
+        # cm = mpl.colormaps.get_cmap("RdYlGn_r")
+        cm = mpl.colormaps.get_cmap("viridis")
+        
         cm.set_bad(color="#cccccc")  # gray for filled
         # plt.rcParams.update({'font.size': 22}) # using a larger font size
         plt.rcParams.update({'font.size': 14}) # using a larger font size
@@ -1604,8 +1657,8 @@ def show_cloud_probability_hist(seed_cloud_prob, seed_noncloud_prob, prob_range,
     # calculate the density hist for each dataset with specified matching bin edges
     [prob_min, prob_max] = prob_range
     # in case when the prob_min is very close to prob_max, the bins will be empty
-    prob_min = min(prob_min, 0)  # to make sure we have the full range of probablity
-    prob_max = max(prob_max, 1)  # to make sure we have the full range of probablity
+    #prob_min = min(prob_min, 0)  # to make sure we have the full range of probablity
+    #prob_max = max(prob_max, 1)  # to make sure we have the full range of probablity
     bins_thrd = np.arange(prob_min, prob_max, prob_bin)
     bins_cloud, _ = np.histogram(seed_cloud_prob, bins=bins_thrd)
     bins_noncloud, _ = np.histogram(seed_noncloud_prob, bins=bins_thrd)
@@ -1617,7 +1670,9 @@ def show_cloud_probability_hist(seed_cloud_prob, seed_noncloud_prob, prob_range,
     ax.set_ylabel('Frequency')
     ax.legend()
     # Set the range of x-axis
-    plt.xlim(0, 1) # on or off
+    # plt.xlim(0, 1) # on or off
+    # plt.ylim(0, 1000000) # on or off
+    plt.xlim(-2, 2) # on or off
     plt.title(title)
     
     from matplotlib.ticker import FormatStrFormatter
@@ -1693,23 +1748,6 @@ def check_image_folder(directory, exclude=None):
         if exclude is not None:
             image_list = [i for i in image_list if Path(i).stem not in exclude]
         return image_list
-
-#%% Functions TBD
-def excold_cloud(temperature=[], llow_temp=-999):
-    if exist(temperature):
-        mask_ccloud = temperature < llow_temp
-        mask_cloud = np.logical_or(mask_cloud, mask_ccloud)
-    else:
-        mask_ccloud = []
-    return mask_cloud, mask_ccloud
-
-def examine_excold_cloud(mask_cloud, temperature=[], llow_temp=-999):
-    if exist(temperature):
-        mask_ccloud = temperature < llow_temp
-        mask_cloud = np.logical_or(mask_cloud, mask_ccloud)
-    else:
-        mask_ccloud = []
-    return mask_cloud, mask_ccloud
 
 def calculate_slope(ele):
     """
@@ -1837,5 +1875,22 @@ def exclude_images_by_tile(exclude, datasets = None, directory = "/gpfs/sharedfs
                     images_dataset.append(ds)
     return images_excluded, images_dataset
 
+
+def count_cloud_noncloud(cloud_mask, label_cloud, label_noncloud):
+    counts = np.bincount(cloud_mask.ravel())
+    count_cloud = counts[label_cloud]
+    count_noncloud = counts[label_noncloud]
+    return count_cloud, count_noncloud
+
+def clean_diff(diff, min_len):
+    labeled, num_objs = label(diff, connectivity=1, return_num=True)
+    if num_objs == 0:
+        return np.zeros_like(diff, dtype=np.uint8)
+    # Count pixels per label
+    labels, counts = np.unique(labeled, return_counts=True)
+    keep_labels = labels[(counts >= min_len) & (labels != 0)]
+    
+    mask_keep = np.isin(labeled, keep_labels)
+    return mask_keep.astype(np.uint8)
 
 # End-of-file (EOF)
