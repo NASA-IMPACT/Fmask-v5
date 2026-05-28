@@ -709,6 +709,7 @@ class UNet(object):
         offanchors = init_patch_offanchors(self.image.obsmask, size=self.patch_size, stride=self.patch_stride_classify, shift=shift)
         # Change the r c off
         wincut = int((self.patch_size - self.patch_stride_classify) / 2)
+        inner = slice(wincut, self.patch_size - wincut)
    
         # initlized image_class and image_prob
 
@@ -733,29 +734,21 @@ class UNet(object):
                 # batch_probs = torch.nn.functional.softmax(self.model(torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])), dim=1)
                 # batch processing the class and prob layer
                 if prob_index == -2: # -2 means the top class will be extracted by this model, but not the probability
-                    # _, batch_classes = batch_probs.topk(1, dim=1)  # top label with top prob.
-                    patches = [
+                    batch_tensor = torch.stack([
                         datacube[:, r:r+self.patch_size, c:c+self.patch_size]
                         for r, c, _, _ in batch_anchors
-                    ]
-                    batch_tensor = torch.stack(patches)
-                    batch_classes = self.model(batch_tensor).argmax(dim=1)
-                    batch_classes = batch_classes.to("cpu").numpy()
-                    for j, (r_off, c_off, _, _) in enumerate(batch_anchors):
+                    ])
+                    logits = self.model(batch_tensor)
+                    batch_classes = torch.argmax(logits, dim=1).to("cpu").numpy()
+                    del batch_tensor, logits
+                    for (r_off, c_off, _, _), cls in zip(batch_anchors, batch_classes):
+                        r2 = r_off + self.patch_size
+                        c2 = c_off + self.patch_size
                         image_class[
-                            r_off + wincut: r_off + self.patch_size - wincut, c_off + wincut: c_off + self.patch_size - wincut
-                        ] = batch_classes[
-                            j,
-                            wincut: self.patch_size - wincut,
-                            wincut: self.patch_size - wincut,
-                        ]
-                        image_class_full[
-                            r_off : r_off + self.patch_size, c_off : c_off + self.patch_size
-                        ] = batch_classes[
-                            j,
-                            :,
-                            :
-                        ]
+                            r_off + wincut:r2 - wincut,
+                            c_off + wincut:c2 - wincut,
+                        ] = cls[inner, inner]
+                        image_class_full[r_off:r2, c_off:c2] = cls
                 elif prob_index == -1: # -1 means only the predicted class will be extracted by this model
                     batch_probs = torch.nn.functional.softmax(self.model(torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])), dim=1)
                     batch_probs, batch_classes = batch_probs.topk(1, dim=1)  # top label with top prob.
