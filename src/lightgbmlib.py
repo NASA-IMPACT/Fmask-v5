@@ -4,6 +4,7 @@
 import os
 import sys
 import pickle
+import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -11,6 +12,10 @@ import constant as C
 import lightgbm as lgb
 from utils import collect_sample_pixel
 np.seterr(invalid='ignore') # ignore the invalid errors
+warnings.filterwarnings(
+    "ignore",
+    message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+)
 
 class Dataset:
     """The class to load the training data for the random forest"""
