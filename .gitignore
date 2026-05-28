@@ -1,1 +1,8 @@
 *.pt
+*.pk
+*.tif
+*.pyc
+.vscode/settings.json
+.DS_Store
+main/.DS_Store
+main/.DS_Store
