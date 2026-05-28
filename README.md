@@ -70,7 +70,7 @@ python fmask.py --imagepath /path/to/image_directory_landsat8-9 --model UPL --dc
 
 To apply Fmask-UPL on a single Sentinel-2 image (recommended cloud dilation: 0 pixels):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud 0
+python fmask.py --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud=0
 ```
 
 To apply Fmask-LPL on a single Landsat 4-7 image (recommended cloud dilation: 1 pixel):
@@ -83,9 +83,9 @@ python fmask.py --imagepath /path/to/image_directory_landsat4-7 --model LPL --dc
 |--------------------|-------|-------------------------------------------------------------------------------------------------|---------|
 | `--imagepath`      | `-i`  | Path to input image directory (Landsat/Sentinel-2).                                             | *required* |
 | `--model`          | `-m`  | Cloud detection model to use (Options shown in [Table 1](#table1)).            | `UPL` |
-| `--dcloud`         | `-c`  | Dilation size (in pixels) for cloud mask.                                                       | `0`     |
-| `--dshadow`        | `-s`  | Dilation size (in pixels) for cloud shadow mask.                                                | `0`     |
-| `--dsnow`          | `-n`  | Dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
+| `--dcloud`         | `-c`  | Additional dilation size (in pixels) for cloud mask.                                                       | `0`     |
+| `--dshadow`        | `-s`  | Additional dilation size (in pixels) for cloud shadow mask.                                                | `0`     |
+| `--dsnow`          | `-n`  | Additional dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
 | `--nthreads`       | `-nt`  | CPU threads for processing one image.                                                        | `1`     |
 | `--output`         | `-o`  | Directory for saving output. If not provided, results go into the input image directory.        | `None`  |
 | `--skip_existing`  | `-s`  | Skip processing if results already exist (`yes` or `no`).                                       | `no`    |

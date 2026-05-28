@@ -59,9 +59,9 @@ class Fmask(object):
     erosion_radius = 0  # the radius of erosion, unit: pixels
     dilation_radius_unet = 0 # not used for now, since we have addressed the ommission issues at image boundarys by shifting the image chips
 
-    # the buffer size of cloud, shadow, and snow in pixels (its resolution is the same as the image's resolution)
+    # the "additional" buffer size of cloud, shadow, and snow in pixels (its resolution is the same as the image's resolution)
     buffer_cloud = 0
-    buffer_shadow = 5 # the buffer size of shadow in pixels, which is larger than the original size, 3 by 3 pixels, since the larger dilation size is able better to fill the holes caused by the projection of clouds (to match shadow)
+    buffer_shadow = 0 # Fmask right now provides cloud shadow with default 3 pixels to fill holes caused by shadow projection, and additional dilation of 23 pixels over spectrally flooding-filled shadow layer.
     buffer_snow = 0
 
     # The classes of the cloud and non-cloud, and filled pixels for the machine learning model
