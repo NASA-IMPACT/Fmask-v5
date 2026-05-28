@@ -437,8 +437,8 @@ def fmask_upl(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, sk
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="no")
 @click.option("--display_fmask", "-df", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save the Fmask result as a PNG file.", default="no")
 @click.option("--display_image", "-di", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save color composite images as PNG files.", default="no")
-@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="no")
-@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Default 0 uses all available cores.", default=1)
+@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="yes")
+@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Default single core. Value 0 uses all available cores.", default=1)
 def main(model, dcloud, dshadow, dsnow, imagepath, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, nthreads) -> None:
     print("************************************************")
     print(f"Starting Fmask {fmask_version} with dilating {dcloud} for cloud, {dshadow} for shadow, and {dsnow} for snow")
