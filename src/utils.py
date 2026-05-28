@@ -1258,7 +1258,10 @@ def normalize_datacube(datacube, **kwargs):
     percentiles = kwargs.get("percentiles", [1, 99])
     srange = kwargs.get("srange", [-1, 1])
     obsmask = kwargs.get("obsmask", None)
-    _datacube = datacube.copy() # not to alter the orginal values
+    copy = kwargs.get("copy", True)
+    
+    _datacube = datacube.copy() if copy else datacube # not to alter the orginal values by default
+   
     if C.MSG_FULL:
         print(f">>> normalizing the datacube to {srange} with percentiles {percentiles}")
     # rescale the data cube

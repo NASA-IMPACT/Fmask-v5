@@ -561,7 +561,7 @@ class UNet(object):
         datacube = self.image.data.get(self.predictors)
 
         if normalize:
-            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask)
+            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask, copy = False)
 
         if C.MSG_FULL:
             print(">>> classifying image by unet")
@@ -695,7 +695,7 @@ class UNet(object):
         # rescale the date cube
         datacube = self.image.data.get(self.predictors)
         if normalize:
-            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask)
+            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask, copy = False)
     
         if C.MSG_FULL:
             print(">>> classifying image by unet")
@@ -909,7 +909,7 @@ class UNet(object):
             # rescale the date cube
             if normalize:
                 datacube = normalize_datacube(
-                    self.image.data.get(self.predictors), obsmask=self.image.obsmask
+                    self.image.data.get(self.predictors), obsmask=self.image.obsmask, copy = False
                 )
 
             # Convert the datacube and reference to tensor
