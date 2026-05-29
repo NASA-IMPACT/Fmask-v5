@@ -12,12 +12,12 @@ Description:
 Batch processing of Landsat and Sentinel-2 images using Fmask 5. See details at fmask.py
 
 Usage examples:
-- python fmask.py --model=UPL --dcloud=3 --dshadow=5 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
+- python fmask.py --model=UPL --dcloud=1 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
 
 Command-line arguments:
 --model: the Fmask cloud detection model to use (PHY, GBM, UNT, LPL, UPU, LPU, UPL)
---dcloud: dilation for cloud mask in pixels; default is 3
---dshadow: dilation for shadow mask in pixels; default is 5
+--dcloud: dilation for cloud mask in pixels; default is 0
+--dshadow: dilation for shadow mask in pixels; default is 0
 --dsnow: dilation for snow mask in pixels; default is 0
 --output: destination directory for results; if not provided, results are saved in the image's directory
 --skip_existing: skip processing the image when its fmask layer exists; default is 'no'
@@ -60,7 +60,7 @@ from fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lpl,  fmask_
     "--output", "-o",
     type=str,
     help="Destination directory for results. If not provided, results are saved in the resource directory.",
-    default="/Users/shi/Downloads/Validation_Random10_Results_Reference",
+    default="/Users/shi/Downloads/Validation_Random10_Results_Test",
 )
 @click.option("--skip_existing", "-s", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Skip processing if results already exist (set to 0 to force generation).", default="yes")
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="yes")
