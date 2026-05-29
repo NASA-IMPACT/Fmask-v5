@@ -3,6 +3,7 @@
 import numpy as np
 import copy
 import pandas
+from concurrent.futures import ThreadPoolExecutor
 from . import constant as C
 from .satellite import Data
 from . import utils
@@ -726,11 +727,9 @@ def compute_cloud_probability_layers(image, min_clear, swo_erosion_radius=0, wat
             wprob_temp = None
             wprob_bright = None
         # END of WATER #
-
-        # empty the saturation data, which will not be used any more
-        image.clean_saturation()
-        
         activated = True
+    # empty the saturation data, which will not be used any more
+    image.clean_saturation()
     return (
         activated,
         pcp,
@@ -779,7 +778,7 @@ def combine_cloud_probability(
         prob = prob + woc * prob_cirrus
     if adjusted:
         prob = prob - clear_probability(prob, mask_absclear)
-        prob[prob < 0] = 0 # we will set it as 0 in final prob.
+        # prob[prob < 0] = 0 # we will set it as 0 in final prob. no need; used only in v 5.0.1
     # prob[mask_absclear] = 0 # no need. exclude abs clear pixels from the cloud probability as 0
     return prob
 
@@ -850,7 +849,6 @@ def convert2seedgroups(
 
     return seed_cloud_prob, seed_noncloud_prob, prob_range
 
-
 def overlap_cloud_probability(
     seed_cloud_prob,
     seed_noncloud_prob,
@@ -886,7 +884,7 @@ def overlap_cloud_probability(
         )  # + prob_bin to make sure the prob_max is included
     else:  # in case when the prob_min is same as to prob_max, the bins will be empty
         bins_thrd = [prob_min, prob_min + prob_bin]
-
+    
     bins_cloud, _ = np.histogram(seed_cloud_prob, bins=bins_thrd)
     bins_noncloud, _ = np.histogram(seed_noncloud_prob, bins=bins_thrd)
     # e.g., if bans are [0, 1, 2, 3], the counts will be [0, 1) [1, 2) [2, 3)
@@ -897,42 +895,58 @@ def overlap_cloud_probability(
     over_rate = (np.min([bins_cloud, bins_noncloud], axis=0)).sum() / (
         len(seed_cloud_prob) + len(seed_noncloud_prob)
     )
+    # over_rate_noncloud = (np.min([bins_cloud, bins_noncloud], axis=0)).sum() / (len(seed_noncloud_prob) + 1e-8)
 
     if split:  # to get the optimal thershold
-        # search optimal thershold to seperate cloud and non-cloud pixels
-        # as we do not want to miss cloud pixels in the physical layer, we will set the threshold_buffer as 0.95
-        thrd_record = bins_thrd[
-            -1
-        ]  # default with maximum error rate by setting the thershold as 1.0
-        num_errors_record = (
-            bins_cloud.sum()
-        )  # in this case, all cloudy pixels were misclassified as non-cloud
-        bins_thrd = bins_thrd[:-1]  # remove the last bin's right boundary
-        for i, thrd in enumerate(bins_thrd):
-            # max_overlap = np.max([bins_overlap[0:i].sum(), bins_overlap[i:].sum()])
-            # count # of cloud pixels on left of the x-axis and # of non-cloud pixels on right of the x-axis, and if their sum moves to be smaller, the result is optimal
-            # the thershold of segmenting clouds is "> thrd" rather than ">= thrd", because the thershold is the left boundary of the bin (included), but the right boundary is not included.
-            # cloud seed pixels were counted by "< thrd" and non-cloud seed pixels were counted by ">= thrd"
-            num_errors = (
-                bins_cloud[
-                    0:i
-                ].sum()  # cloud pixels on the left of the thershold, not included the boundary
-                + bins_noncloud[
-                    i:
-                ].sum()  # non-cloud pixels on the right of the thershold, included the boundary
-            )
+        # Initial case: threshold is right boundary of last bin
+        thrd_record = bins_thrd[-1]
+        num_errors_record = bins_cloud.sum()
 
-            # the optimal thershold is the one that can make the overlapping density as low as possible
-            # i.e., the thershold is altered only when the error rate reduced 5% compared to the previous one
-            if (
-                num_errors_record - num_errors
-            ) > threshold * num_errors_record:  # same as to (num_errors - num_errors_record)/num_errors_record < -threshold
-                num_errors_record = num_errors.copy()
-                thrd_record = thrd.copy()
+        # Remove last right boundary, same as your original logic
+        thrd_candidates = bins_thrd[:-1]
+
+        # cloud error: cloud pixels left of threshold, excluding current bin
+        cloud_left_errors = np.concatenate(([0], np.cumsum(bins_cloud)[:-1]))
+
+        # noncloud error: noncloud pixels right of threshold, including current bin
+        noncloud_right_errors = np.cumsum(bins_noncloud[::-1])[::-1]
+
+        num_errors_all = cloud_left_errors + noncloud_right_errors
+
+        for thrd, num_errors in zip(thrd_candidates, num_errors_all):
+            if (num_errors_record - num_errors) > threshold:
+                num_errors_record = num_errors
+                thrd_record = thrd
+                
+        # # search optimal thershold to seperate cloud and non-cloud pixels
+        # thrd_record = bins_thrd[
+        #     -1
+        # ] 
+        # num_errors_record = (
+        #     bins_cloud.sum()
+        # )  # in this case, all cloudy pixels were misclassified as non-cloud
+        # bins_thrd = bins_thrd[:-1]  # remove the last bin's right boundary
+        # for i, thrd in enumerate(bins_thrd):
+        #     # max_overlap = np.max([bins_overlap[0:i].sum(), bins_overlap[i:].sum()])
+        #     # count # of cloud pixels on left of the x-axis and # of non-cloud pixels on right of the x-axis, and if their sum moves to be smaller, the result is optimal
+        #     # the thershold of segmenting clouds is "> thrd" rather than ">= thrd", because the thershold is the left boundary of the bin (included), but the right boundary is not included.
+        #     # cloud seed pixels were counted by "< thrd" and non-cloud seed pixels were counted by ">= thrd"
+        #     num_errors = (
+        #         bins_cloud[
+        #             0:i
+        #         ].sum()  # cloud pixels on the left of the thershold, not included the boundary
+        #         + bins_noncloud[
+        #             i:
+        #         ].sum()  # non-cloud pixels on the right of the thershold, included the boundary
+        #     )
+            
+        #     if (num_errors_record - num_errors) > threshold:  # same as to (num_errors - num_errors_record)/num_errors_record < -threshold
+        #         num_errors_record = num_errors.copy()
+        #         thrd_record = thrd.copy()
         return over_rate, thrd_record
-    return over_rate, None
-
-
+    else:
+        return over_rate, None
+    
 def clear_probability(prob, clear):
     """Calculate the clear probability based on the given probability array and clear mask.
 
@@ -1043,82 +1057,7 @@ def shift_by_solar(coords, height, solar_elevation, solar_azimuth, resolution):
     return coords
 
 
-def project_dem2plane4(ele, solar_elevation, solar_azimuth, resolution, mask_filled):
-    """
-    Projects a digital elevation model (DEM) to a plane based on solar elevation and azimuth.
-
-    Args:
-        ele (numpy.ndarray): The digital elevation model.
-        solar_elevation (float): The solar elevation angle in degrees.
-        solar_azimuth (float): The solar azimuth angle in degrees.
-        resolution (float): The resolution of the DEM in meters.
-        mask_filled (numpy.ndarray): A mask indicating filled pixels in the DEM.
-
-    Returns:
-        tuple: A tuple containing three arrays:
-            - PLANE2IMAGE_ROW (numpy.ndarray): A matrix storing the mapping between the plane and the image (row indices).
-            - PLANE2IMAGE_COL (numpy.ndarray): A matrix storing the mapping between the plane and the image (column indices).
-            - PLANE_OFFSET (numpy.ndarray): The offset applied to the plane coordinates to make them positive.
-    """
-
-    ele = ele - np.percentile(
-        ele[~mask_filled], 0.1
-    )  # relative elevation 0.1 is to avoid the outlier
-    ele[ele < 0] = 0 # minimum elevation is 0 after do the relative elevation
-    # get the coordinates of all the dem pixels
-    image_coords = np.argwhere(np.ones_like(ele, dtype=bool))
-    # image_coords = np.indices(ele.shape).reshape(2, -1).T  # Faster than np.argwhere
-    # projection along the solar direction
-    plane_coords = shift_by_solar(
-        image_coords.copy(), # do not vary the values
-        ele[image_coords[:, 0], image_coords[:, 1]],
-        np.deg2rad(solar_elevation).copy(), # convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # convert to radiance
-        resolution,
-    )
-
-    # create new array to preserve the plane_coords as positive
-    PLANE_OFFSET = np.min(plane_coords, axis=0)
-    plane_coords = plane_coords - PLANE_OFFSET  # make the plane_coords as positive
-    PLANE_SHAPE = np.max(plane_coords, axis=0) + 1
-
-    # create a matrix to store the mapping between the plane and the image
-    PLANE2IMAGE_ROW = np.full(PLANE_SHAPE, -1, dtype=np.int32)
-    PLANE2IMAGE_COL = np.full(PLANE_SHAPE, -1, dtype=np.int32)
-    # convert to integer by round
-    image_coords = np.round(image_coords).astype(np.int32)
-    # append the mapping between the plane and the image
-    PLANE2IMAGE_ROW[plane_coords[:, 0], plane_coords[:, 1]] = image_coords[:, 0]
-    PLANE2IMAGE_COL[plane_coords[:, 0], plane_coords[:, 1]] = image_coords[:, 1]
-    
-    # since the round function may cause the same pixel to be mapped to different pixels, we need to fill the NaN values
-    def fill_nan_nearest(plane_array, background=-1):
-        """
-        Fills NaN values in a 2D array using nearest valid neighbor values.
-
-        Parameters:
-        - plane_array: np.ndarray, 2D array with NaNs.
-
-        Returns:
-        - filled_array: np.ndarray, same shape as input but with NaNs filled.
-        """
-        nan_mask = plane_array == background
-        
-        # NaNs are filled
-        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # Up, down, left, right
-            shifted_array = np.roll(plane_array, shift=(dx, dy), axis=(0, 1))
-            plane_array[nan_mask] = shifted_array[nan_mask]
-        plane_array[plane_array == background] = 0  # Fill remaining NaNs with 0
-        return plane_array
-
-    # Apply to both PLANE2IMAGE_ROW and PLANE2IMAGE_COL
-    PLANE2IMAGE_ROW = fill_nan_nearest(PLANE2IMAGE_ROW)
-    PLANE2IMAGE_COL = fill_nan_nearest(PLANE2IMAGE_COL)
-        
-    return PLANE2IMAGE_ROW, PLANE2IMAGE_COL, PLANE_OFFSET
-
-
-def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar_azimuth, resolution):
+def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar_azimuth, resolution, nthreads=1):
     """
     Projects a Digital Elevation Model (DEM) onto a plane based on solar elevation and azimuth angles.
     uint16 is used for storing the plane coordinates to avoid overflow.
@@ -1140,21 +1079,31 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
     # Separate coordinates for odd and even indices for both row and column, in order to reduce it happens that mutiple image_coords for the same plane_coords (projected)
     image_coords_odd = image_coords[(image_coords[:, 0] % 2 == 1) & (image_coords[:, 1] % 2 == 1)]  # Odd rows and odd columns
     image_coords_even = image_coords[(image_coords[:, 0] % 2 == 0) & (image_coords[:, 1] % 2 == 0)]  # Even rows and even columns
-    
+
     # adjust the shift by sensor
-    
-    shifts = []
+    nthreads = max(1, int(nthreads))
+    batch_size = 1000000
+
     n_total = image_coords_odd.shape[0]
-    for i in range(0, n_total, 1000000): # batch_size = 1000000
-        batch = image_coords_odd[i:min(i + 1000000, n_total)]
-        shifted = shift_by_sensor(batch.copy(),
-                                  ele[batch[:, 0], batch[:, 1]],
-                                  np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]), 
-                                  np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]), 
-                                  resolution)
-        shifts.append(shifted)
+    starts = list(range(0, n_total, batch_size))
+
+    def _process_odd_chunk(start):
+        batch = image_coords_odd[start:min(start + batch_size, n_total)]
+        return shift_by_sensor(
+            batch.copy(),
+            ele[batch[:, 0], batch[:, 1]],
+            np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]),
+            np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]),
+            resolution,
+        )
+
+    if len(starts) > 1 and nthreads > 1:
+        with ThreadPoolExecutor(max_workers=nthreads) as executor:
+            shifts = list(executor.map(_process_odd_chunk, starts))
+    else:
+        shifts = [_process_odd_chunk(start) for start in starts]
     image_coords_odd_shift = np.vstack(shifts)
-    del shifts, batch
+    del shifts
 
     # image_coords_odd_shift = shift_by_sensor(
     #     image_coords_odd.copy(),
@@ -1183,18 +1132,26 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
     # )
     
     # adjust the shift by sensor
-    shifts = []
     n_total = image_coords_even.shape[0]
-    for i in range(0, n_total, 1000000): # batch_size = 1000000
-        batch = image_coords_even[i:min(i + 1000000, n_total)]
-        shifted = shift_by_sensor(batch.copy(), 
-                                  ele[batch[:, 0], batch[:, 1]], 
-                                  np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]), 
-                                  np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]), 
-                                  resolution)
-        shifts.append(shifted)
+    starts = list(range(0, n_total, batch_size))
+
+    def _process_even_chunk(start):
+        batch = image_coords_even[start:min(start + batch_size, n_total)]
+        return shift_by_sensor(
+            batch.copy(),
+            ele[batch[:, 0], batch[:, 1]],
+            np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]),
+            np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]),
+            resolution,
+        )
+
+    if len(starts) > 1 and nthreads > 1:
+        with ThreadPoolExecutor(max_workers=nthreads) as executor:
+            shifts = list(executor.map(_process_even_chunk, starts))
+    else:
+        shifts = [_process_even_chunk(start) for start in starts]
     image_coords_even_shift = np.vstack(shifts)
-    del shifts, batch
+    del shifts
     
     
     # Projection along the solar direction for the second set of image coordinates
@@ -1230,113 +1187,6 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
     PLANE2IMAGE_COL_EVEN[plane_coords_even[:, 0], plane_coords_even[:, 1]] = image_coords_even[:, 1] # even 
     return PLANE2IMAGE_ROW_ODD, PLANE2IMAGE_COL_ODD, PLANE2IMAGE_ROW_EVEN, PLANE2IMAGE_COL_EVEN, PLANE_OFFSET
 
-def project_dem2plane2(ele, solar_elevation, solar_azimuth, resolution):
-    """ Backup version of simple project_dem2plane function
-    Projects a digital elevation model (DEM) to a plane based on solar elevation and azimuth.
-
-    Args:
-        ele (numpy.ndarray): The digital elevation model.
-        solar_elevation (float): The solar elevation angle in degrees.
-        solar_azimuth (float): The solar azimuth angle in degrees.
-        resolution (float): The resolution of the DEM in meters.
-
-    Returns:
-        tuple: A tuple containing three arrays:
-            - PLANE2IMAGE_ROW (numpy.ndarray): A matrix storing the mapping between the plane and the image (row indices).
-            - PLANE2IMAGE_COL (numpy.ndarray): A matrix storing the mapping between the plane and the image (column indices).
-            - PLANE_OFFSET (numpy.ndarray): The offset applied to the plane coordinates to make them positive.
-    """
-
-    # get the coordinates of all the dem pixels
-    # image_coords = np.argwhere(np.ones_like(ele, dtype=bool))
-    image_coords = np.indices(ele.shape).reshape(2, -1).T  # Faster than np.argwhere
-    # projection along the solar direction
-    plane_coords = shift_by_solar(
-        image_coords.copy(), # do not vary the values
-        ele[image_coords[:, 0], image_coords[:, 1]],
-        np.deg2rad(solar_elevation).copy(), # convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # convert to radiance
-        resolution,
-    )
-
-    # create new array to preserve the plane_coords as positive
-    PLANE_OFFSET = np.min(plane_coords, axis=0)
-    plane_coords = plane_coords - PLANE_OFFSET  # make the plane_coords as positive
-    PLANE_SHAPE = np.max(plane_coords, axis=0) + 1
-
-    # create a matrix to store the mapping between the plane and the image
-    PLANE2IMAGE_ROW = np.full(PLANE_SHAPE, 0, dtype=np.int32)
-    PLANE2IMAGE_COL = np.full(PLANE_SHAPE, 0, dtype=np.int32)
-    # convert to integer by round
-    image_coords = np.round(image_coords).astype(np.int32)
-    # append the mapping between the plane and the image
-    PLANE2IMAGE_ROW[plane_coords[:, 0], plane_coords[:, 1]] = image_coords[:, 0]
-    PLANE2IMAGE_COL[plane_coords[:, 0], plane_coords[:, 1]] = image_coords[:, 1]
-
-    return PLANE2IMAGE_ROW, PLANE2IMAGE_COL, PLANE_OFFSET
-
-def project_dem2plane3(ele, solar_elevation, solar_azimuth, resolution):
-    # Back up for using combined code, with "code1*10000 + code2"
-    """
-    Projects a Digital Elevation Model (DEM) onto a plane based on solar elevation and azimuth angles.
-    Args:
-        ele (np.ndarray): 2D array representing the elevation values of the DEM.
-        solar_elevation (float): Solar elevation angle in degrees.
-        solar_azimuth (float): Solar azimuth angle in degrees.
-        resolution (float): Spatial resolution of the DEM.
-    Returns:
-        tuple: A tuple containing:
-            - PLANE2IMAGE_ROW (np.ndarray): 2D array mapping plane coordinates to image row indices.
-            - PLANE2IMAGE_COL (np.ndarray): 2D array mapping plane coordinates to image column indices.
-            - PLANE_OFFSET (np.ndarray): Offset applied to plane coordinates to ensure they are positive.
-    """
-
-    # get the coordinates of all the dem pixels
-    # image_coords = np.argwhere(np.ones_like(ele, dtype=bool))
-    image_coords = np.indices(ele.shape).reshape(2, -1).T  # Faster than np.argwhere
-    # Separate coordinates for odd and even indices for both row and column, in order to reduce it happens that mutiple image_coords for the same plane_coords (projected)
-    image_coords_odd = image_coords[(image_coords[:, 0] % 2 == 1) & (image_coords[:, 1] % 2 == 1)]  # Odd rows and odd columns
-    image_coords_even = image_coords[(image_coords[:, 0] % 2 == 0) & (image_coords[:, 1] % 2 == 0)]  # Even rows and even columns
-    
-    # Projection along the solar direction for the first set of image coordinates
-    plane_coords_odd = shift_by_solar(
-        image_coords_odd.copy(), # do not vary the values
-        ele[image_coords_odd[:, 0], image_coords_odd[:, 1]],
-        np.deg2rad(solar_elevation).copy(),  # Convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # Convert to radiance
-        resolution,
-    ).round().astype(np.int32)
-    # Projection along the solar direction for the second set of image coordinates
-    plane_coords_even = shift_by_solar(
-        image_coords_even.copy(), # do not vary the values
-        ele[image_coords_even[:, 0], image_coords_even[:, 1]],
-        np.deg2rad(solar_elevation).copy(),  # Convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # Convert to radiance
-        resolution,
-    ).round().astype(np.int32)
-    # convert to integer by round
-    # image_coords_odd = np.round(image_coords_odd).astype(np.int32) # max is 2,147,4 83,647
-    # image_coords_even = np.round(image_coords_even).astype(np.int32) # max is 2,147,4 83,647
-    # create new array to preserve the plane_coords as positive
-    # Calculate PLANE_OFFSET before stacking
-    # Get the minimum values for odd and even plane coordinates
-    PLANE_OFFSET = np.minimum(np.min(plane_coords_odd, axis=0), np.min(plane_coords_even, axis=0))
-    # Calculate PLANE_SHAPE using the maximum values across odd and even sets
-    plane_coords_odd = plane_coords_odd - PLANE_OFFSET  # make the plane_coords as positive
-    plane_coords_even = plane_coords_even - PLANE_OFFSET  # make the plane_coords as positive
-    # Find the global maximum to define the plane shape
-    PLANE_SHAPE = np.maximum(np.max(plane_coords_odd, axis=0), np.max(plane_coords_even, axis=0)) + 1
-
-    # create a matrix to store the mapping between the plane and the image
-    PLANE2IMAGE_ROW = np.full(PLANE_SHAPE, 0, dtype=np.int32)
-    PLANE2IMAGE_COL = np.full(PLANE_SHAPE, 0, dtype=np.int32)
-    # append the mapping between the plane and the image, first for the odd pixels
-    PLANE2IMAGE_ROW[plane_coords_odd[:, 0], plane_coords_odd[:, 1]] = image_coords_odd[:, 0]
-    PLANE2IMAGE_COL[plane_coords_odd[:, 0], plane_coords_odd[:, 1]] = image_coords_odd[:, 1]
-    # encode the even row and column indices in the same matrix, 10000*loc_odd + loc_even, 10000 is enough for the image size of Landsat and Sentinel-2 (10/20m) (Sentinel2 image size is 10980*10980)
-    PLANE2IMAGE_ROW[plane_coords_even[:, 0], plane_coords_even[:, 1]] = 10000*PLANE2IMAGE_ROW[plane_coords_even[:, 0], plane_coords_even[:, 1]] + image_coords_even[:, 0]
-    PLANE2IMAGE_COL[plane_coords_even[:, 0], plane_coords_even[:, 1]] = 10000*PLANE2IMAGE_COL[plane_coords_even[:, 0], plane_coords_even[:, 1]] + image_coords_even[:, 1]
-    return PLANE2IMAGE_ROW, PLANE2IMAGE_COL, PLANE_OFFSET
 
 def segment_cloud_objects(cloud, min_area=3, buffer2connect=0, exclude=None, exclude_method = 'any'):
     """
@@ -1365,11 +1215,11 @@ def segment_cloud_objects(cloud, min_area=3, buffer2connect=0, exclude=None, exc
     ):  # connect neighbor clouds to match cloud shadows at same time
         cloud_dilated = utils.dilate(cloud, radius=buffer2connect)
         cloud_objects = label(
-            cloud_dilated, background=0, return_num=False, connectivity=None
+            cloud_dilated, background=0, return_num=False, connectivity=2
         )
         cloud_objects[~cloud] = 0
     else:
-        cloud_objects = label(cloud, background=0, return_num=False, connectivity=None)
+        cloud_objects = label(cloud, background=0, return_num=False, connectivity=2)
 
     cloud_regions = regionprops(cloud_objects)
     if min_area > 0:
@@ -1398,7 +1248,91 @@ def segment_cloud_objects(cloud, min_area=3, buffer2connect=0, exclude=None, exc
     return cloud_objects, cloud_regions
 
 
+def filter_object_overlap(cloud_target, reference = None, threshold=0):
+    """
+    Keep connected objects in cloud_target that overlap reference.
+    """
+    if reference is None:
+        return cloud_target
+    # if no true in cloud_target
+    if not cloud_target.any():
+        return cloud_target
+    
+    labels = label(cloud_target, background=0, return_num=False, connectivity=2)   # 8-neighborhood
 
+    labels_flat = labels.ravel()
+
+    max_label = labels.max()
+    # Number of overlapping reference pixels per object
+    overlap_count = np.bincount(
+        labels_flat,
+        weights=reference.ravel(),
+        minlength=max_label + 1
+    )
+
+    # Total pixels per object
+    object_size = np.bincount(
+        labels_flat,
+        minlength=max_label + 1
+    )
+    del labels_flat, max_label
+
+    # Overlap ratio
+    overlap_ratio = overlap_count / (object_size + C.EPS)
+    del overlap_count, object_size
+
+    # keep objects that have any overlap
+    keep = overlap_ratio > threshold
+
+    # ensure background (0) is always excluded
+    keep[0] = False
+
+    return keep[labels]
+
+def bifilter_object_overlap(cloud_ml, cloud_piml, threshold_keep_ml = 1, threshold_keep_piml = -1):
+    """
+    Bidirectionally filters cloud objects based on object-level overlap consistency
+    between ML and PIML cloud masks.
+
+    Parameters
+    ----------
+    cloud_ml : np.ndarray (bool)
+        Cloud mask from ML model.
+    cloud_piml : np.ndarray (bool)
+        Cloud mask from PIML model.
+    threshold_keep_ml : float
+        Minimum overlap ratio to keep ML objects w.r.t. PIML.
+        - threshold < 0 : no filtering applied to ML (keep all objects)
+        - threshold >= 1 : no ML objects can satisfy condition (ML effectively excluded)
+    threshold_keep_piml : float
+        Minimum overlap ratio to keep PIML objects w.r.t. ML.
+        - threshold < 0 : no filtering applied to PIML (keep all objects)
+        - threshold >= 1 : no PIML objects can satisfy condition (PIML effectively excluded)
+
+    Returns
+    -------
+    np.ndarray (bool)
+        Combined filtered cloud mask.
+    """
+
+    cloud_ml_filtered = None
+    cloud_piml_filtered = None
+
+    if threshold_keep_ml < 1: # if threshold_keep_ml >= 1, keep all the cloud objects in cloud_ml
+        cloud_ml_filtered = filter_object_overlap(cloud_ml, reference = cloud_piml, threshold = threshold_keep_ml)
+
+    if threshold_keep_piml < 1: # if threshold_keep_piml >= 1, keep all the cloud objects in cloud_piml
+        cloud_piml_filtered = filter_object_overlap(cloud_piml, reference = cloud_ml, threshold = threshold_keep_piml)
+
+    if (cloud_ml_filtered is not None) and (cloud_piml_filtered is not None):
+        return cloud_ml_filtered | cloud_piml_filtered
+    elif cloud_piml_filtered is not None:
+        return cloud_piml_filtered
+    elif cloud_ml_filtered is not None:
+        return cloud_ml_filtered
+    else:
+        return np.zeros_like(cloud_ml, dtype=bool) # if both thresholds are >= 1, we do not filter any cloud objects, return all False mask
+    
 def find_neighbor_cloud_base_height(icloud, num_close_clouds, cloud, 
                             record_cloud_base_heights, record_cloud_centroids,
                             cloud_height_min, cloud_height_max):
@@ -1512,7 +1446,7 @@ def match_cloud2shadow(
     similarity=0.1,
     similarity_tolerance= 0.95,  # the tolerance of the similarity, in order to speed up the process
     penalty_weight = 0.9,  # the penalty for the cloud shadow matching to the regions that we do not understand the underlanding surface, like out-of-image and other identified clouds
-    sampling_cloud=80000, # number of sampling pixels to find the shadow, in order to speed up the process. the value 0 means to use all the pixels
+    sampling_cloud=120000, # number of sampling pixels to find the shadow, in order to speed up the process. the value 0 means to use all the pixels
     thermal=None,
     surface_temp_low=None,
     surface_temp_high=None,
@@ -1524,6 +1458,7 @@ def match_cloud2shadow(
     PLANE2IMAGE_COL_EVEN=None,
     PLANE_OFFSET=None,
     apcloud=False,
+    nthreads=1,
 ):
     """
     Matches the cloud mask with the shadow mask to identify cloud shadows.
@@ -1620,7 +1555,67 @@ def match_cloud2shadow(
     mask_filled[pshadow] = 0 # exclude the shadow pixels from the filled mask for sure, which will not be punished by the shadow matching
     # pcloud[mask_filled] = 0  # exclude the filled pixels from the cloud mask for sure
 
-    # iterate the cloud objects by enumate loop
+    # create a single executor shared across all clouds and all batches
+    # (avoids repeated thread-pool creation/teardown overhead per batch)
+    _batch_size = max(1, int(nthreads))
+    _executor = ThreadPoolExecutor(max_workers=_batch_size) if _batch_size > 1 else None
+
+    def _compute_sim(cloud_base_height):
+        """Return (cloud_base_height, similarity) for one height candidate.
+        All inputs are read-only, so this is safe to call from multiple threads."""
+        if thermal_included:
+            _cloud_height = (
+                cloud_temp_base - cloud_temp[csampling]
+            ) * rate_elapse + cloud_base_height
+        else:
+            _cloud_height = cloud_base_height
+
+        # shift_by_sensor / shift_by_solar modify coords in-place, so copy first
+        _coords = cloud_coords[csampling].copy()
+        _coords = shift_by_sensor(
+            _coords,
+            _cloud_height,
+            cloud_view_zenith[csampling],
+            cloud_view_azimuth[csampling],
+            resolution,
+        )
+        if dem_proj:
+            _coords = shift_by_solar(
+                _coords,
+                _cloud_height + cloud_surface_ele,
+                solar_elevation,
+                solar_azimuth,
+                resolution,
+            )
+            _coords = _coords - PLANE_OFFSET
+            _coords = _coords[(
+                (_coords[:, 0] >= 0) & (_coords[:, 0] < plane_shape[0]) &
+                (_coords[:, 1] >= 0) & (_coords[:, 1] < plane_shape[1])
+            )]
+            _coords = np.concatenate((
+                np.hstack((PLANE2IMAGE_ROW_ODD[_coords[:, 0], _coords[:, 1]].reshape(-1, 1),
+                            PLANE2IMAGE_COL_ODD[_coords[:, 0], _coords[:, 1]].reshape(-1, 1))),
+                np.hstack((PLANE2IMAGE_ROW_EVEN[_coords[:, 0], _coords[:, 1]].reshape(-1, 1),
+                            PLANE2IMAGE_COL_EVEN[_coords[:, 0], _coords[:, 1]].reshape(-1, 1)))), axis=0)
+            _coords = _coords[~((_coords[:, 0] == 0) & (_coords[:, 1] == 0))]
+        else:
+            _coords = shift_by_solar(
+                _coords, _cloud_height, solar_elevation, solar_azimuth, resolution
+            )
+        _outside = (
+            (_coords[:, 0] < 0) | (_coords[:, 0] >= image_height) |
+            (_coords[:, 1] < 0) | (_coords[:, 1] >= image_width)
+        )
+        _coords = _coords[~_outside]
+        _num_out = int(np.count_nonzero(_outside))
+        _shadow_proj = cloud_objects[_coords[:, 0], _coords[:, 1]] != cloud.label
+        _num_shadow = np.sum(_shadow_proj * pshadow[_coords[:, 0], _coords[:, 1]])
+        _num_filled = np.count_nonzero(_shadow_proj & mask_filled[_coords[:, 0], _coords[:, 1]])
+        _sim = (_num_shadow + (1.0 - penalty_weight) * (_num_filled + _num_out)) / (
+            np.count_nonzero(_shadow_proj) + _num_out + C.EPS
+        )
+        return cloud_base_height, _sim
+
     for icloud, cloud in enumerate(cloud_regions):
         # print('Cloud: ', icloud)
         # down-sampling the big cloud object
@@ -1688,149 +1683,85 @@ def match_cloud2shadow(
             view_azimuth[cloud_coords[:, 0], cloud_coords[:, 1]]
         )  # in radian
 
-        # iterate the cloud height from cloud_height_min to cloud_height_max
-        for cloud_base_height in np.arange(
-            cloud_height_min, cloud_height_max + cloud_height_interval, cloud_height_interval # + cloud_height_interval to make sure the cloud_height_max is included
-        ):
-            # when thermal available, create 3D cloud object with the cloud height according to the thermal band
-            if thermal_included:
-                cloud_height = (
-                    cloud_temp_base - cloud_temp[csampling]
-                ) * rate_elapse + cloud_base_height
+        # ---- height-candidate search: lookahead of batch_size heights in parallel ----
+        # batch_size heights are evaluated concurrently; the same sequential decision
+        # logic is then applied to the pre-computed results.  At most (batch_size - 1)
+        # extra evaluations occur at each exit boundary — a small overhead in exchange
+        # for full parallelism within every batch.
+        height_candidates = np.arange(
+            cloud_height_min, cloud_height_max + cloud_height_interval, cloud_height_interval
+        )
+        batch_size = _batch_size
+
+
+        # iterate heights in lookahead batches
+        _shadow_found = False
+        for _batch_start in range(0, len(height_candidates), batch_size):
+            _batch = height_candidates[_batch_start : _batch_start + batch_size]
+
+            # compute similarities for this batch (parallel when batch has >1 height)
+            if _executor is not None and len(_batch) > 1:
+                _batch_sims = sorted(_executor.map(_compute_sim, _batch), key=lambda x: x[0])
             else:
-                cloud_height = cloud_base_height # no 3D cloud object
+                _batch_sims = [_compute_sim(h) for h in _batch]
 
-            # make it as new variable to keep the original cloud object
-            coords = cloud_coords[csampling]
-            # calculate the cloud's coords
-            coords = shift_by_sensor(
-                coords,
-                cloud_height,
-                cloud_view_zenith[csampling],
-                cloud_view_azimuth[csampling],
-                resolution,
-            )
-
-            # when dem is available, adjust the base height of the cloud object relative to the reference plane
-            if dem_proj:
-                coords = shift_by_solar(
-                    coords,
-                    cloud_height + cloud_surface_ele,
-                    solar_elevation,
-                    solar_azimuth,
-                    resolution,
-                )  # relative to the reference plane
-                # convert the coordinates from the plane to the image based on the plane_coords
-                # find the coords within the plane_coords
-                coords = coords - PLANE_OFFSET  # make the plane_coords as positive
-                # Filter out coordinates that are outside the plane boundaries
-                coords = coords[(
-                    (coords[:, 0] >= 0) & (coords[:, 0] < plane_shape[0]) &   # row within bounds
-                    (coords[:, 1] >= 0) & (coords[:, 1] < plane_shape[1])     # column within bounds
-                )]  # remove the pixels out of the image (reference plane)
-
-                # Stack the odd and even coordinates vertically
-                coords = np.concatenate((np.hstack((PLANE2IMAGE_ROW_ODD[coords[:, 0], coords[:, 1]].reshape(-1, 1), PLANE2IMAGE_COL_ODD[coords[:, 0], coords[:, 1]].reshape(-1, 1))),
-                                         np.hstack((PLANE2IMAGE_ROW_EVEN[coords[:, 0], coords[:, 1]].reshape(-1, 1), PLANE2IMAGE_COL_EVEN[coords[:, 0], coords[:, 1]].reshape(-1, 1)))), axis=0)
-
-                # exclude the pixels with row and col are zero
-                coords = coords[~((coords[:, 0] == 0) & (coords[:, 1] == 0))]  # remove the pixels that have not been mapped to the image, and projected to sample pixels on the plane
-            else:
-                coords = shift_by_solar(
-                    coords, cloud_height, solar_elevation, solar_azimuth, resolution
-                )
-
-            # the id list of the pixels out of the image
-            list_coords_outside = (
-                (coords[:, 0] < 0) # equivalent to zero because some of the coords are not recored in the mapping matrix
-                | (coords[:, 0] >= image_height)
-                | (coords[:, 1] < 0) # equivalent to zero because some of the coords are not recored in the mapping matrix
-                | (coords[:, 1] >= image_width)
-            )
-            coords = coords[~list_coords_outside]  # remove the pixels out of the image
-
-            num_out_image = np.count_nonzero(list_coords_outside)
-
-            # count the number of false pixels
-            # the pixels over the cloud or shadow layer (exclude original cloud)
-            shadow_projected = (
-                cloud_objects[coords[:, 0], coords[:, 1]] != cloud.label
-            )  # that include other clouds and clear pixels
-            num_match2shadow = np.sum(
-                shadow_projected * pshadow[coords[:, 0], coords[:, 1]]
-            )  # here * used to consider multiply potential shadow layers, i.e, unet shadow plus filled shadow
-            #num_match2cloud = np.count_nonzero(
-            #    shadow_projected & pcloud[coords[:, 0], coords[:, 1]]
-            #)  # here cloud_mask_binary has been merged with potential cloud and potential shadow together prior to
-            num_match2filled = np.count_nonzero(
-                shadow_projected & mask_filled[coords[:, 0], coords[:, 1]]
-            )  # here mask_filled has been merged with potential cloud and potential shadow together prior to
-
-            # simplify the similarity calculation with one line
-            # 0.5 is used to punlish the projected pixels over cloud or filled layer, where there is no way to determine the potential cloud shadow:
-            # num_match2shadow + 0.5 * (num_match2cloud + num_match2filled) + num_out_image
-            # total number that is the total pixel (exclude original cloud): np.count_nonzero(shadow_projected) + num_out_image
-            # C.EPS is used to avoid the division by zero
-            # + num_out_image
-            # similarity_matched = (num_match2shadow + (1.0 - penalty_weight) * (num_match2cloud + num_match2filled + num_out_image))/(np.count_nonzero(shadow_projected) + num_out_image + C.EPS)
-            similarity_matched = (num_match2shadow + (1.0 - penalty_weight) * (num_match2filled + num_out_image))/(np.count_nonzero(shadow_projected) + num_out_image + C.EPS)
-
-            # if the estimated height is over the record_close_cloud_base_height, we punish the similarity, with the ratio of the neigbor cloud height to the current cloud height
-            # if the record_close_cloud_base_height is not zero, it means we have found the cloud shadow, in the previous clouds
-            # if (record_close_cloud_base_height > 0) and (cloud_base_height > record_close_cloud_base_height):
-            #     similarity_matched = similarity_matched * (
-            #         record_close_cloud_base_height/cloud_base_height
-            #     )
-
-            # if we have found the cloud shadow, and the neighbor cloud height is lower than the previous one, then stop the iteration
-            if not (
-                record_num_matched > 0
-                and record_close_cloud_base_height > 0 # when we use the neighbor cloud height information
-                and record_close_cloud_base_height <= cloud_base_height
-            ):
-                # update the similarity recorded in this iteration
-                if (
-                    similarity_matched >= record_similiarity * similarity_tolerance # tolerance for the similarity with 0.95
-                    and cloud_base_height < cloud_height_max - cloud_height_interval # not reach the maximum height
-                    and record_similiarity < similarity_max # not reach the maximum similarity
+            # apply the same sequential decision logic to the pre-computed batch results
+            _broke_early = False
+            for cloud_base_height, similarity_matched in _batch_sims:
+                # if we have found the cloud shadow, and the neighbor cloud height is lower
+                # than the previous one, then stop the iteration
+                if not (
+                    record_num_matched > 0
+                    and record_close_cloud_base_height > 0
+                    and record_close_cloud_base_height <= cloud_base_height
                 ):
-                    if similarity_matched > record_similiarity:
-                        record_similiarity = similarity_matched
-                        record_cloud_base_height = cloud_base_height
-                    continue  # continue the iteration
-                else:
-                    if record_similiarity >= similarity_min: #show check out the matched similarity is larger than the thershold
-                        # a shadow was found
-                        record_num_matched = record_num_matched + 1
-
-                        # allow to continue to reach the height of the neighbor cloud object if the similarity is higher than the recorded one
-                        if cloud_base_height < record_close_cloud_base_height:
-                            if (
-                                similarity_matched >= record_similiarity
-                                # or similarity_matched >= similarity_max # within the tolerance of the similarity
-                            ):
-                                record_similiarity = similarity_matched
-                                record_cloud_base_height = cloud_base_height
-                            continue  # continue the iteration
-                        # stop the iteration
-                    else:
-                        record_similiarity = 0.0  # reset the similarity if the value of similarity is too small
+                    # update the similarity recorded in this iteration
+                    if (
+                        similarity_matched >= record_similiarity * similarity_tolerance
+                        and cloud_base_height < cloud_height_max - cloud_height_interval
+                        and record_similiarity < similarity_max
+                    ):
+                        if similarity_matched > record_similiarity:
+                            record_similiarity = similarity_matched
+                            record_cloud_base_height = cloud_base_height
                         continue  # continue the iteration
+                    else:
+                        if record_similiarity >= similarity_min:
+                            # a shadow was found
+                            record_num_matched = record_num_matched + 1
 
-            if record_num_matched == 0:
-                break  # stop the iteration if no cloud shadow is found
+                            # allow to continue to reach the height of the neighbor cloud object
+                            if cloud_base_height < record_close_cloud_base_height:
+                                if similarity_matched >= record_similiarity:
+                                    record_similiarity = similarity_matched
+                                    record_cloud_base_height = cloud_base_height
+                                continue  # continue the iteration
+                            # stop the iteration
+                        else:
+                            record_similiarity = 0.0  # reset similarity
+                            continue  # continue the iteration
 
-            # if the code reaches here, it means we have found the cloud shadow finally
-            # when thermal available, create 3D cloud object with the cloud height according to the thermal band
+                if record_num_matched == 0:
+                    _broke_early = True
+                    break  # stop: no cloud shadow found
+
+                # shadow found — final projection performed below
+                _shadow_found = True
+                _broke_early = True
+                break  # stop this batch
+
+            if _broke_early:
+                break  # stop processing further batches
+
+        # if a cloud shadow was matched, project all cloud pixels at record_cloud_base_height
+        if _shadow_found:
+            # when thermal available, create 3D cloud object using the thermal band
             if thermal_included:
                 cloud_height = (
                     cloud_temp_base - cloud_temp  # use all the pixels
                 ) * rate_elapse + record_cloud_base_height
             else:
                 cloud_height = record_cloud_base_height
-            # print('cloud_height: ', cloud_height)
-            # print('record_cloud_base_height: ', record_cloud_base_height)
-            # print('record_similiarity: ', record_similiarity)
             # calculate the cloud's coords
             coords = (
                 cloud.coords
@@ -1847,7 +1778,7 @@ def match_cloud2shadow(
                 resolution,
             )
 
-            # when dem is available, adjust the base height of the cloud object relative to the reference plane
+            # when dem is available, adjust the base height relative to the reference plane
             if dem_proj:
                 coords = shift_by_solar(
                     coords,
@@ -1855,51 +1786,26 @@ def match_cloud2shadow(
                     solar_elevation,
                     solar_azimuth,
                     resolution,
-                )  # relative to the reference plane
-                # convert the coordinates from the plane to the image based on the plane_coords
-                # find the coords within the plane_coords
-                coords = coords - PLANE_OFFSET  # make the plane_coords as positive
+                )
+                coords = coords - PLANE_OFFSET
                 coords = coords[(
-                    (coords[:, 0] >= 0) & (coords[:, 0] < plane_shape[0]) &   # row within bounds
-                    (coords[:, 1] >= 0) & (coords[:, 1] < plane_shape[1])     # column within bounds
-                )]  # remove the pixels out of the image (reference plane)
-      
-                # Decode the row and column indices for PLANE2IMAGE_ROW and PLANE2IMAGE_COL, and stack odd and even coordinates together
-                # Fetch the values from the mapping arrays once
-                # plane2image_row_vals = PLANE2IMAGE_ROW[coords[:, 0], coords[:, 1]]
-                # plane2image_col_vals = PLANE2IMAGE_COL[coords[:, 0], coords[:, 1]]
-                # # Compute the odd and even parts separately
-                # row_odd, row_even = divmod(plane2image_row_vals, 10000)
-                # col_odd, col_even = divmod(plane2image_col_vals, 10000)
-                # Stack the results efficiently
-                # row_odd, row_even = PLANE2IMAGE_ROW[coords[:, 0], coords[:, 1], :]
-                # col_odd, col_even = PLANE2IMAGE_COL[coords[:, 0], coords[:, 1], :]
-                # Stack the results efficiently
-                # coords = np.column_stack((np.concatenate((row_odd, row_even)),
-                #                        np.concatenate((col_odd, col_even))))
-                
-                # Decode the row and column indices for PLANE2IMAGE_ROW and PLANE2IMAGE_COL, and stack odd and even coordinates together
-                # coords = np.vstack((np.column_stack((PLANE2IMAGE_ROW[coords[:, 0], coords[:, 1]] // 10000, PLANE2IMAGE_COL[coords[:, 0], coords[:, 1]] // 10000)) , 
-                #                     np.column_stack((PLANE2IMAGE_ROW[coords[:, 0], coords[:, 1]] % 10000 , PLANE2IMAGE_COL[coords[:, 0], coords[:, 1]] % 10000))))
-                
-                # Stack the odd and even coordinates vertically
+                    (coords[:, 0] >= 0) & (coords[:, 0] < plane_shape[0]) &
+                    (coords[:, 1] >= 0) & (coords[:, 1] < plane_shape[1])
+                )]
                 coords = np.concatenate((np.hstack((PLANE2IMAGE_ROW_ODD[coords[:, 0], coords[:, 1]].reshape(-1, 1), PLANE2IMAGE_COL_ODD[coords[:, 0], coords[:, 1]].reshape(-1, 1))),
                                          np.hstack((PLANE2IMAGE_ROW_EVEN[coords[:, 0], coords[:, 1]].reshape(-1, 1), PLANE2IMAGE_COL_EVEN[coords[:, 0], coords[:, 1]].reshape(-1, 1)))), axis=0)
-                # exclude the pixels with row and col are zero
-                coords = coords[~((coords[:, 0] == 0) & (coords[:, 1] == 0))]  # remove the pixels that have not been mapped to the image or projected to sample pixels on the plane
+                coords = coords[~((coords[:, 0] == 0) & (coords[:, 1] == 0))]
             else:
                 coords = shift_by_solar(
                     coords, cloud_height, solar_elevation, solar_azimuth, resolution
                 )
             list_coords_outside = (
-                (coords[:, 0] < 0) # equivalent to zero because some of the coords are not recored in the mapping matrix
+                (coords[:, 0] < 0)
                 | (coords[:, 0] >= image_height)
-                | (coords[:, 1] < 0) # equivalent to zero because some of the coords are not recored in the mapping matrix
+                | (coords[:, 1] < 0)
                 | (coords[:, 1] >= image_width)
             )
-            coords = coords[
-                ~list_coords_outside
-            ]  # remove the pixels out of the image
+            coords = coords[~list_coords_outside]
 
             # recording
             shadow_mask_matched[coords[:, 0], coords[:, 1]] = True
@@ -1907,9 +1813,8 @@ def match_cloud2shadow(
                 cloud_radius > num_edge_pixels
             ):  # not for small cloud object, its height will be used to assign the cloud height
                 record_cloud_base_heights[icloud] = cloud_base_height
-            # record_num_matched = record_num_matched + 1
-            # stop the iteration
-            break
+    if _executor is not None:
+        _executor.shutdown(wait=False)
     # exclude cloud pixels
     shadow_mask_matched[cloud_objects > 0] = False
     return shadow_mask_matched, cloud_mask_matched
@@ -1917,7 +1822,7 @@ def match_cloud2shadow(
 
 class Physical:
     """Physical model for cloud detection"""
-
+    nthreads = 1
     image = None
     activated = None # indicate it was initiated or not, and then turn to False or True
     pcp = None
@@ -1938,6 +1843,8 @@ class Physical:
     options_var = [True, False]
     options_temp = [True, False]
     options_cirrus = [True, False]
+    phy_law = False
+    seedoverlap = 1.1 # > 1 means this does not be triggered
 
     # we do not use this option right now, since we do not want to change the physical rules
     # erosion of water mask, which is used to remove the small water pixels, such as narrow river and ponds. For those, we do not need to get based on the gswo dataset, just use the spectral test
@@ -1949,7 +1856,7 @@ class Physical:
     # the minimum number of clear pixels to start up the cloud probability model, as well as the minimum number for representing clear surface pixels, which is used to normalize the thermal band
     min_clear = 40000
     # minimum number of cloud pixels to start up the cloud shadow matching
-    sampling_cloud = 80000
+    sampling_cloud = 120000
     # min similarity between the cloud object and the cloud shadow object
     similarity = 0.1
     # the tolerance of the similarity, in order to speed up the process
@@ -2014,13 +1921,13 @@ class Physical:
             self.options_var = [False]
             self.options_temp = [True]
             self.options_cirrus = [False]
-            prob_temp, _, _ = self.select_cloud_probability(adjusted=False)
+            prob_temp, _ = self.select_cloud_probability(adjusted=False)
 
             # generate the cloud probability for spectral variation
             self.options_var = [True]
             self.options_temp = [True]
             self.options_cirrus = [False]
-            prob_var, _, _ = self.select_cloud_probability(adjusted=False)
+            prob_var, _ = self.select_cloud_probability(adjusted=False)
             prob_var = prob_var / (
                 prob_temp + C.EPS
             )  # select_cloud_prob does not support the rule only var
@@ -2052,7 +1959,7 @@ class Physical:
             self.options_var = [False]
             self.options_temp = [True]
             self.options_cirrus = [False]
-            prob_temp, _, _ = self.select_cloud_probability(adjusted=False)
+            prob_temp, _ = self.select_cloud_probability(adjusted=False)
 
             # restore the orginal options
             self.options_var = options_var_temp.copy()
@@ -2072,7 +1979,7 @@ class Physical:
             None: If the method is not activated.
         """
         if self.activated:
-            cloud_prob, _, _ = self.select_cloud_probability(
+            cloud_prob, _ = self.select_cloud_probability(
                 seed=None,
                 options_var=[self.options[0]],
                 options_temp=[self.options[1]],
@@ -2163,20 +2070,21 @@ class Physical:
         Returns:
             None
         """
-        # create the probability layers according to the datacube
-        (
-            self.activated,
-            self.pcp,
-            self.lprob_var,
-            self.lprob_temp,
-            self.wprob_temp,
-            self.wprob_bright,
-            self.prob_cirrus,
-            self.water,
-            self.snow,
-            self.surface_temp_low,  # only when the physical model was activated, we can get the surface temperature, that will be used to narrow the height of the cloud
-            self.surface_temp_high,
-        ) = compute_cloud_probability_layers(self.image, min_clear=self.min_clear, swo_erosion_radius = self.swo_erosion_radius, water_erosion_radius=self.water_erosion_radius)
+        if self.activated is None: # only when it was not activated
+            # create the probability layers according to the datacube
+            (
+                self.activated,
+                self.pcp,
+                self.lprob_var,
+                self.lprob_temp,
+                self.wprob_temp,
+                self.wprob_bright,
+                self.prob_cirrus,
+                self.water,
+                self.snow,
+                self.surface_temp_low,  # only when the physical model was activated, we can get the surface temperature, that will be used to narrow the height of the cloud
+                self.surface_temp_high,
+            ) = compute_cloud_probability_layers(self.image, min_clear=self.min_clear, swo_erosion_radius = self.swo_erosion_radius, water_erosion_radius=self.water_erosion_radius)
 
     def select_cloud_probability(
         self,
@@ -2211,10 +2119,15 @@ class Physical:
 
         # Test the optimal model by histogram overlapped
         # Convert as exporting cloud probability
+        
+        #    self.options = options_record  # update the options determined
+        #    self.threshold = threshold_record  # update the threshold determined
+        #    self.seedoverlap = ol_record  # update the overlap determined
         prob_record = None
-        ol_record = 1.0
-        options_record = None
-        threshold_record = 0
+        ol_record = self.seedoverlap
+        options_record = self.options
+        threshold_record = self.threshold
+        phy_law_record = self.phy_law
         # at default, we use the current options
         if options_var is None:
             options_var = self.options_var
@@ -2252,6 +2165,8 @@ class Physical:
                         mask_absclear_land,
                         adjusted=adjusted,
                     )
+                    if prob_record is None: # initialize the prob_record with the first model, and then only update the pixels where the prob. over water is higher than the prob. over land
+                        prob_record = mask_prob.copy()
                     # check prob. over water
                     if np.any(mask_absclear_water):
                         # in case when only temporial prob. is used (actually we do not have for water in Sentinel-2), we use the previous prob. for water
@@ -2262,12 +2177,11 @@ class Physical:
                             & (not isinstance(self.wprob_temp, np.ndarray))
                         ):
                             # pylint: disable=unsubscriptable-object
-                            if prob_record is not None:
-                                mask_prob = np.where(
-                                    np.bitwise_and(self.water, prob_record > mask_prob),
-                                    prob_record,
-                                    mask_prob,
-                                )
+                            mask_prob = np.where(
+                                np.bitwise_and(self.water, prob_record > mask_prob),
+                                prob_record,
+                                mask_prob,
+                            )
                         else:
                             mask_prob_water = combine_cloud_probability(
                                 var,
@@ -2288,6 +2202,7 @@ class Physical:
                                 mask_prob_water,
                                 mask_prob,
                             )
+                            del mask_prob_water
                     if seed is not None:
                         # convert the cloud probability to the seed groups with 1 array
                         seed_cloud_prob, seed_noncloud_prob, prob_range = (
@@ -2300,6 +2215,13 @@ class Physical:
                                 equal_num=False,
                             )
                         )
+                        
+                        # check if the cloud's prob is higher than non-cloud's prob, which is a basic physical law for the cloud probability; here we use median to avoid the outlier; this is a very strict physical law, which is used to filter out the options that do not make sense; in this way, we can save the time for finding the optimal threshold, and also make the cloud probability more reasonable
+                        # percentiles were tested, but the 50% is optimal, indicating the median value is good here
+                        phy_law = np.median(seed_cloud_prob) > np.median(seed_noncloud_prob)
+                        if not phy_law:
+                            continue
+
                         # get the overlap rate between cloud and non-cloud pixels
                         ol, opt_thrd = overlap_cloud_probability(
                             seed_cloud_prob,
@@ -2311,6 +2233,7 @@ class Physical:
                             print(
                                 f">>> cloud probability ({str(var)[0]}{str(tmp)[0]}{str(cir)[0]}) | overlap: {ol:.3f} | optimal threshold: {opt_thrd:.3f}"
                             )
+
                         # ol, thrd_opt = overlap_cloud_probability(mask_prob, mask_seed, label_cloud=1, label_noncloud=0, prob_range = prob_range, prob_bin=0.025)
                         if show_figure:
                             # make title with the options at the end (TTT)
@@ -2336,30 +2259,36 @@ class Physical:
                             utils.show_cloud_mask(
                                 mask_cloud, ["noncloud", "cloud", "filled"], "Cloud mask"
                             )
+                        del seed_cloud_prob, seed_noncloud_prob
                     else:
                         ol = 1.0 # 100% overlap between cloud and noncloud pixels
                         opt_thrd = self.threshold # default threshold
+                        phy_law = self.phy_law # default
+
                     # update the optimal model if the overlap rate is decreased
-                    if (ol_record == 1) or (
+                    if (ol_record == 1.1) or (
                         ((ol_record - ol) / (ol_record + C.EPS)) > self.overlap
-                    ):  # 2 % decreased
+                    ): # optimal thershold is zero here, which means ol_record is larger than ol
                         ol_record = ol  # that cannot use .copy()
                         prob_record = mask_prob.copy()
                         options_record = [var, tmp, cir]
                         threshold_record = opt_thrd
-                        
+                        phy_law_record = phy_law
+                    del mask_prob
 
         if (
             seed is not None
         ):  # only for the seed pixels which are used to find the optimal threshold
             self.options = options_record  # update the options determined
             self.threshold = threshold_record  # update the threshold determined
+            self.seedoverlap = ol_record  # update the overlap determined
+            self.phy_law = phy_law_record
             if C.MSG_FULL:
                 print(
                     f">>> optimal cloud probability ({str(options_record[0])[0]}{str(options_record[1])[0]}{str(options_record[2])[0]}) | optimal threshold: {threshold_record:.3f}"
                 )
 
-        return prob_record, options_record, threshold_record
+        return prob_record, threshold_record
 
     def match_cloud2shadow(
         self,
@@ -2383,6 +2312,7 @@ class Physical:
         """
         # convert to relative elevation to the mininum elevation within the imagery
         dem_relative = self.image.data.get("dem")
+        self.image.data.drop("dem") # drop the dem data to save memory, since we have got the relative elevation, and we do not need the absolute elevation anymore
         dem_base = np.percentile(dem_relative[self.image.obsmask], 0.1)  # relative elevation 0.1 is to avoid the outlier
         dem_relative = dem_relative - dem_base
 
@@ -2397,6 +2327,7 @@ class Physical:
             self.image.sun_elevation,
             self.image.sun_azimuth,
             self.image.resolution,
+            nthreads=self.nthreads,
         )
         
         if C.MSG_FULL:
@@ -2441,10 +2372,11 @@ class Physical:
             # PLANE2IMAGE_COL=plane2image_col,
             PLANE_OFFSET=plane_offset,
             apcloud=False,
+            nthreads=self.nthreads,
         )
         return shadow_last
 
-    def __init__(self, predictors, woc, threshold, overlap=0.0) -> None:
+    def __init__(self, predictors, woc, threshold, overlap=0.0, nthreads = 1) -> None:
         """Initialize the physical model"""
         # only when the physical model was activated, we can get the surface temperature, that will be used to narrow the height of the cloud
         self.image = None
@@ -2458,3 +2390,4 @@ class Physical:
         self.overlap = overlap  # 0% overlap increasing compared to the previous test to alter the physical models
         # extremely cold cloud
         self.threshold_cold_cloud = 35  # in degree
+        self.nthreads = nthreads

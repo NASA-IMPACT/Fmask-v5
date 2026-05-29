@@ -384,8 +384,9 @@ class LightGBM(object):
     """
 
     image = None  # image object
+    probability = 0.0 # image-based UNet classification probability, mean value
     path = None  # path of base LightGBM model
-
+    nthreads = 1 # the number of threads for parallel processing, 0 means using all available threads
     sample: Dataset = None
 
     # designed for reducing the processing time with subsampling progress
@@ -425,7 +426,7 @@ class LightGBM(object):
                                    min_data_in_leaf = self.min_data_in_leaf,
                                    n_estimators=self.ntrees,
                                    random_state = C.RANDOM_SEED,
-                                   n_jobs  = 0, # thread count follows OMP_NUM_THREADS; defaults to all physical cores if unset
+                                   n_jobs  = self.nthreads,
                                    verbose = -1) # no verbose, do not show the warnings in the progress
     
         if (
@@ -448,6 +449,17 @@ class LightGBM(object):
         """ Load model from the provided path"""
         self.sample = pickle.load(open(self.path[0:-3] + "_sample.pk", "rb"))
         self.model = pickle.load(open(self.path, "rb"))
+
+    def set_num_threads(self, nthreads = None):
+        """Set the number of threads for parallel processing.
+
+        Args:
+            nthreads (int): The number of threads to be used. 0 means using all available threads.
+        """
+        if nthreads is not None:
+            self.nthreads = nthreads
+        if self.model is not None and hasattr(self.model, "set_params"):
+            self.model.set_params(n_jobs=self.nthreads)
 
     def save(self, path = None):
         """Save the model to the provided path.
@@ -501,6 +513,7 @@ class LightGBM(object):
         """
         if C.MSG_FULL:
             print(">>> classifying the image by lightgbm model")
+        self.set_num_threads() # set the number of threads for parallel processing
         # create the subsampling mask according to the subsampling size
         if subsampling_mask is None:
             if base:
@@ -582,7 +595,10 @@ class LightGBM(object):
                 image_prob[sample_image_row, sample_image_col] = pro_pred
             # Free memory
             del pro_pred
-
+        
+        # set up the image-based classification probability's mean value, which will be used as indicator to decide the machine learning prediction is reliable
+        if image_prob is not None:
+            self.probability = np.mean(image_prob[subsampling_mask])
         return image_class, image_prob, subsampling_mask
 
     def __init__(
@@ -594,11 +610,12 @@ class LightGBM(object):
         min_data_in_leaf: int = 20,
         max_depth: int = -1,
         nsamples: int = 20000,
-        tune_update_rate: float = 0.03,
+        tune_update_rate: float = 0.05,
         tune_append_rate: float = 0.0,
         subsampling_size = 1,
         subsampling_min = 0,
         path=None,
+        nthreads = 1,
     ):
         """
         Initialize the LightGBM object.
@@ -623,3 +640,4 @@ class LightGBM(object):
         self.tune_append_rate = tune_append_rate
         self.subsampling_size = subsampling_size
         self.subsampling_min = subsampling_min
+        self.nthreads = nthreads

@@ -1,5 +1,6 @@
 # pylint: disable=line-too-long
 import os
+import gc
 import sys
 from pathlib import Path
 from typing import Union
@@ -13,7 +14,7 @@ from .lightgbmlib import Dataset as PixeDataset
 from .lightgbmlib import LightGBM
 from . import constant as C
 from ._paths import get_data_root as _get_data_root
-from .phylib import Physical, segment_cloud_objects
+from .phylib import Physical, segment_cloud_objects, bifilter_object_overlap
 from .bitlib import BitLayer
 import numpy as np
 from skimage.filters import threshold_otsu
@@ -26,9 +27,12 @@ class Fmask(object):
     # Cloud detection algorithm
     algorithm = "interaction"  # the algorithm for cloud masking, including "physical", "randomforest", "unet", "interaction"
 
+    # nthreads
+    nthreads = 0 # the number of threads for parallel processing, 0 means using all available threads
+
     # Image object can be hold either a Landsat or Sentinel2 object
     image: Union[Landsat, Sentinel2] = None
-
+    
     # The physical cloud detection model
     physical: Physical = None
     
@@ -68,15 +72,12 @@ class Fmask(object):
     base_machine_learning = ["unet"]  # the base machine learning model for cloud masking, such as 'unet', 'lightgbm', 'lightgbm_unet'
     tune_machine_learning = "lightgbm"  # the machine learning model for tuning the cloud masking, such as 'unet', 'lightgbm'
     tune_strategy = "transfer"  # 'transfer' or 'new'
-    pixel_erosion_radius = 0  # the radius of erosion for water for excluding potential false water pixels for training lightgbm, unit: pixels
     max_iteration = (
         1  # maximum iteration numbers between fmask and machine learning model
     )
-    disagree_rate = 0.25  # the rate of disagreement between two consective iteration by machine learning. It will not be used if the max_iteration is 1
+    
     seed_levels = [0, 0] # percentile of selecting non-cloud seeds and cloud seeds
  
-    physical_rules_dynamic = True  # able to change rules during the iterations
-
     # the valid pixel values in reference data
     valid_class_labels = [
         C.LABEL_CLEAR,
@@ -161,8 +162,8 @@ class Fmask(object):
             else:
                 mask[self.cloud.last] = C.LABEL_CLOUD
             mask[self.image.filled] = C.LABEL_FILL
-            # convert to uint8
-            mask = mask.astype("uint8")
+            # convert to uint8, which is already done in the above process, so no need to convert again
+            # mask = mask.astype("uint8")
             return mask
 
     @property
@@ -207,6 +208,25 @@ class Fmask(object):
             i for i, pre in enumerate(datalayers) if pre in predictors
         ]
 
+    def drop_unused_image_bands(self, predictors_to_keep) -> None:
+        """Drop loaded bands that are not needed for subsequent steps."""
+        keep = set(predictors_to_keep)
+        bands_to_drop = [b for b in self.image.data.bands if b not in keep]
+        if bands_to_drop:
+            self.image.data.drop(bands_to_drop)
+
+    def _filter_small_clouds_by_cdi(self, cloud_objects, cloud_regions) -> list:
+        """Remove small clouds whose CDI values all indicate likely false positives."""
+        cdi_mask = self.image.data.get("cdi") > -0.5
+        valid_regions = []
+        for cld_obj in cloud_regions:
+            coords = cld_obj.coords
+            if (cld_obj.area < 10000) and np.all(cdi_mask[coords[:, 0], coords[:, 1]]):
+                cloud_objects[coords[:, 0], coords[:, 1]] = 0
+            else:
+                valid_regions.append(cld_obj)
+        return valid_regions
+
     # %% Methods
     def init_modules(self, loadmodel = True) -> None:
         """
@@ -222,7 +242,7 @@ class Fmask(object):
         spacecraft = self.image.spacecraft.upper()
         if spacecraft in ["LANDSAT_8", "LANDSAT_9"]:
             self.physical = Physical(
-                predictors=P.l8_predictor_cloud_phy.copy(), woc=0.3, threshold=0.175, overlap=0.0
+                predictors=P.l8_predictor_cloud_phy.copy(), woc=0.3, threshold=0.175, overlap=0.0, nthreads=self.nthreads
             )
             if(self.algorithm == "lightgbm") or (self.algorithm == "interaction" and (self.tune_machine_learning == "lightgbm" or "lightgbm" in self.base_machine_learning)):
                 if loadmodel:
@@ -233,9 +253,10 @@ class Fmask(object):
                     classes=["noncloud", "cloud"],
                     num_leaves=30,
                     min_data_in_leaf=700,
-                    tune_update_rate=0.03,
+                    tune_update_rate=0.05,
                     predictors=P.l8_predictor_cloud_pixel.copy(),
                     path=path_model,
+                    nthreads = self.nthreads,
                 )
             if(self.algorithm == "unet") or (self.algorithm == "interaction" and (self.tune_machine_learning == "unet" or "unet" in self.base_machine_learning)):
                 if loadmodel:
@@ -252,6 +273,7 @@ class Fmask(object):
                     patch_stride_classify=224,
                     tune_epoch=5,
                     path=path_model,
+                    nthreads = self.nthreads,
                 )
             self.resolution = 30  # spatial resolution that we processing the image
             self.erosion_radius = int(90/self.resolution)  # the radius of erosion, unit: pixels
@@ -259,7 +281,7 @@ class Fmask(object):
 
         elif spacecraft in ["LANDSAT_4", "LANDSAT_5", "LANDSAT_7"]:
             self.physical = Physical(
-                predictors=P.l7_predictor_cloud_phy.copy(), woc=0.0, threshold=0.1, overlap=0.0
+                predictors=P.l7_predictor_cloud_phy.copy(), woc=0.0, threshold=0.1, overlap=0.0, nthreads=self.nthreads
             )
             if self.algorithm == "lightgbm" or (self.algorithm == "interaction" and (self.tune_machine_learning == "lightgbm" or "lightgbm" in self.base_machine_learning)):
                 if loadmodel:
@@ -270,9 +292,10 @@ class Fmask(object):
                     classes=["noncloud", "cloud"],
                     num_leaves=30,
                     min_data_in_leaf=700,
-                    tune_update_rate=0.03,
+                    tune_update_rate=0.05,
                     predictors=P.l7_predictor_cloud_pixel.copy(),
                     path=path_model,
+                    nthreads = self.nthreads,
                 )
             if self.algorithm == "unet" or (self.algorithm == "interaction" and (self.tune_machine_learning == "unet" or "unet" in self.base_machine_learning)):
                 if loadmodel:
@@ -289,6 +312,7 @@ class Fmask(object):
                     patch_stride_classify=224,
                     tune_epoch=5,
                     path=path_model,
+                    nthreads=self.nthreads,
                 )
             self.resolution = 30  # spatial resolution that we processing the image
             self.erosion_radius = int(150/self.resolution)  # the radius of erosion, unit: pixels
@@ -296,7 +320,7 @@ class Fmask(object):
 
         elif spacecraft in ["SENTINEL-2A", "SENTINEL-2B", "SENTINEL-2C"]:
             self.physical = Physical(
-                predictors=P.s2_predictor_cloud_phy.copy(), woc=0.5, threshold=0.2, overlap=0.0
+                predictors=P.s2_predictor_cloud_phy.copy(), woc=0.5, threshold=0.2, overlap=0.0, nthreads=self.nthreads
             )
             if self.algorithm == "lightgbm" or (self.algorithm == "interaction" and (self.tune_machine_learning == "lightgbm" or "lightgbm" in self.base_machine_learning)):
                 if loadmodel:
@@ -307,9 +331,10 @@ class Fmask(object):
                     classes=["noncloud", "cloud"],
                     num_leaves=40,
                     min_data_in_leaf=500,
-                    tune_update_rate=0.03,
+                    tune_update_rate=0.05,
                     predictors=P.s2_predictor_cloud_pixel.copy(),
                     path=path_model,
+                    nthreads=self.nthreads,
                 )
             if self.algorithm == "unet" or (self.algorithm == "interaction" and (self.tune_machine_learning == "unet" or "unet" in self.base_machine_learning)):
                 if loadmodel:
@@ -326,6 +351,7 @@ class Fmask(object):
                     patch_stride_classify=224,
                     tune_epoch=5,
                     path=path_model,
+                    nthreads = self.nthreads,
                 )
 
             self.resolution = 20  # spatial resolution that we processing the image
@@ -391,7 +417,7 @@ class Fmask(object):
             None
         """
         # load image with the specific bands that we know
-        self.image.load_data(self.full_predictor)
+        self.image.load_data(self.full_predictor, nthreads=self.nthreads)
 
         # forward dataset to the models, without tripling the dataset
         if self.physical is not None:
@@ -506,14 +532,20 @@ class Fmask(object):
         self.cloud = BitLayer(self.image.shape)
         self.cloud.append(self.physical.pcp)
 
-    def mask_shadow(self, postprocess, min_area = 3, buffer2connect = 0, potential = "flood", topo="SCS", thermal_adjust = True, threshold = 0.15):
+    def mask_shadow(self, postprocess, min_area = 3, dilation_spectral_size = 0, dilation_spectral_region = 'outside', buffer2connect = 3, potential = "flood", topo="SCS", thermal_adjust = True, threshold = 0.2):
         """
         Masks the shadow in the image based on the given parameters.
         Parameters:
         postprocess (str): Indicates whether post-processing should be applied.
         min_area (int): The minimum area of the shadow to be considered.
+        dilation_spectral_size (int): The size of the dilation for spectral shadow detection.
+        dilation_spectral_region (str): The region for spectral shadow dilation.
+        buffer2connect (int): The buffer size for connecting adjacent shadows.
         potential (str, optional): The method to be used for potential shadow detection. Defaults to "flood".
-        thermal_include (bool, optional): Indicates whether thermal information should be included. Defaults to True, only for Landsat.
+        topo (str, optional): The topographic method to be used. Defaults to "SCS".
+        thermal_adjust (bool, optional): Indicates whether thermal adjustment should be applied. Defaults to True.
+        constrain2potential (bool, optional): Indicates whether to constrain the potential shadow detection. Defaults to False.
+        threshold (float, optional): The threshold for shadow detection. Defaults to 0.2.
         Returns:
         None
         Notes:
@@ -531,7 +563,11 @@ class Fmask(object):
             self.mask_shadow_rest()
         elif self.cloud_percentage > 0: # only when there are some clouds, we need to match the shadows
             self.create_cloud_object(postprocess=postprocess, min_area=min_area, buffer2connect=buffer2connect)
-            self.mask_shadow_geometry(potential=potential, topo=topo, thermal_adjust=thermal_adjust, threshold = threshold)
+            self.mask_shadow_geometry(potential=potential, topo=topo, 
+                                      dilation_spectral_size=dilation_spectral_size,
+                                      dilation_spectral_region=dilation_spectral_region, 
+                                      thermal_adjust=thermal_adjust,
+                                      threshold = threshold)
 
     def mask_shadow_rest(self):
         """Masks the cloud shadow on the left side of the cloud."""
@@ -600,7 +636,7 @@ class Fmask(object):
             )
 
     # post processing and generate cloud objects
-    def create_cloud_object(self, min_area = 3, postprocess = "none", buffer2connect = 0):
+    def create_cloud_object(self, min_area = 3, postprocess = "none", buffer2connect = 0, overlap_threshold = None):
         """
         Erodes the false positive cloud pixels.
         Returns:
@@ -620,11 +656,11 @@ class Fmask(object):
             #    return
             # morphology-based, follow Qiu et al., 2019 RSE
             if C.MSG_FULL:
-                print(">>> postprocessing with morphology-based elimination")
+                print(">>> postprocessing via morphology-based elimination")
             # get the potential false positive cloud pixels
             pfpl = self.mask_potential_bright_surface()
             # erode the false positive cloud pixels
-            pixels_eroded = utils.erode(cloud_layer, radius = self.erosion_radius)
+            pixels_eroded = utils.erode(cloud_layer, radius = self.erosion_radius, structure='square')
             pfpl = (~pixels_eroded) & pfpl & (~self.physical.water) & self.image.obsmask # indicate the eroded cloud pixels over land
             del pixels_eroded
 
@@ -650,29 +686,33 @@ class Fmask(object):
                 del valid_indices
             # after postprocessing
             self.cloud.append(cloud_objects >0)
-        elif (postprocess == "unet"):
-            # only when the physical model is activated
-            # if not self.physical.activated:
-            #    return
+            
+            # only do this after making the postprocessing for cloud objects, such as the mininum size of small cloud objects
+            if buffer2connect > 0:
+                [cloud_objects, cloud_regions] = segment_cloud_objects(cloud_objects >0, buffer2connect=buffer2connect)
+        elif (postprocess == "object_filtering"):
             if C.MSG_FULL:
-                print(">>> postprocessing with UNet-based elimination")
-            # Use dilated version only if needed
-            unet_cloud = self.cloud.first
-            unet_cloud = utils.dilate(unet_cloud, radius=self.dilation_radius_unet) if self.dilation_radius_unet > 0 else unet_cloud
-            [cloud_objects, cloud_regions] = segment_cloud_objects(cloud_layer, min_area=min_area, exclude=(unet_cloud==0), exclude_method = 'all')
-            del unet_cloud
-            # after postprocessing
-            self.cloud.append(cloud_objects >0)
+                print(">>> postprocessing via object filtering")
+            if overlap_threshold is None: # default overlap thresholds for keeping clouds
+                if "SENTINEL-2" in self.image.spacecraft.upper():
+                    overlap_threshold = (0.2, 0)
+                else:
+                    overlap_threshold = (1.0, 0.3) # no ML layer kept in the final
+            cloud_layer = bifilter_object_overlap(self.cloud.first, cloud_layer, threshold_keep_ml=overlap_threshold[0], threshold_keep_piml=overlap_threshold[1])
+            self.cloud.append(cloud_layer)
+            # segment as objects to be ready for shadow masking
+            [cloud_objects, cloud_regions] = segment_cloud_objects(cloud_layer, min_area=min_area, buffer2connect=buffer2connect)
+            del cloud_layer
         elif (postprocess == "morphology_unet"):
             if C.MSG_FULL:
-                print(">>> postprocessing with morphology&unet-based elimination")
+                print(">>> postprocessing via morphology&unet-based elimination")
             # Use dilated version only if needed
             unet_cloud = self.cloud.first
-            unet_cloud = utils.dilate(unet_cloud, radius=self.dilation_radius_unet) if self.dilation_radius_unet > 0 else unet_cloud
+            unet_cloud = utils.dilate(unet_cloud, radius=self.dilation_radius_unet, structure='square') if self.dilation_radius_unet > 0 else unet_cloud
              # get the potential false positive cloud pixels
             pfpl = self.mask_potential_bright_surface()
             # erode the false positive cloud pixels
-            pixels_eroded = utils.erode(cloud_layer, radius = self.erosion_radius)
+            pixels_eroded = utils.erode(cloud_layer, radius = self.erosion_radius, structure='square')
             pfpl = (~pixels_eroded) & pfpl & (~self.physical.water) & self.image.obsmask # indicate the eroded cloud pixels over land
             del pixels_eroded
             pfpl = pfpl | (unet_cloud==0) # exclude the unet cloud pixels
@@ -700,9 +740,9 @@ class Fmask(object):
             # after postprocessing
             self.cloud.append(cloud_objects >0)
         
-        # only do this after making the postprocessing for cloud objects, such as the mininum size of small cloud objects
-        if buffer2connect > 0:
-            [cloud_objects, cloud_regions] = segment_cloud_objects(cloud_objects >0, buffer2connect=buffer2connect)
+            # only do this after making the postprocessing for cloud objects, such as the mininum size of small cloud objects
+            if buffer2connect > 0:
+                [cloud_objects, cloud_regions] = segment_cloud_objects(cloud_objects >0, buffer2connect=buffer2connect)
         # assign the cloud objects and regions 
         self.cloud_object = cloud_objects
         self.cloud_region = cloud_regions
@@ -711,6 +751,7 @@ class Fmask(object):
     def mask_potential_bright_surface(self):
         """
         Masks the potential bright surface pixels in the image.
+        Required bands: ndbi, ndvi, cdi (optional), tirs1 (optional), slope or dem (for mountain areas)
         Returns:
             numpy.ndarray: The mask indicating the potential bright surface pixels.
         """
@@ -741,7 +782,7 @@ class Fmask(object):
 
         # Buffer urban pixels with a 500 window to connect the potential false positive cloud pixels into one layer
         radius_pixels = int(250 / self.image.resolution)  # 1 km = 33 Landsat pixels, 500m = 17, 200m = 7
-        pfpl = utils.dilate(pfpl, radius=radius_pixels)
+        pfpl = utils.dilate(pfpl, radius=radius_pixels, structure='square')
         
         # add the snow pixels in normal regions with no dilation in mountain areas
         pfpl = pfpl | self.physical.snow
@@ -754,9 +795,9 @@ class Fmask(object):
         Args:
             outcome (str, optional): Can be "classified" or "physical". Defaults to "classified".
         """
-        
+
         ## Special case: when the update rate is zero or tune_epoch is zero, we do not need to update the model, just use the base model as the base
-        # test only, which can be removed in loclean version
+        # test only, which can be removed in clean version
         if outcome == "classified":
             if self.tune_machine_learning == "unet" and self.unet_cloud.tune_epoch == 0:
                 self.mask_cloud_unet()
@@ -765,22 +806,11 @@ class Fmask(object):
                 self.mask_cloud_lightgbm()
                 return
 
-        # init cloud layer in bit layers
-        self.cloud = BitLayer(self.image.shape)
-
-        #%% init cloud probabilities
-        if self.physical.activated is None:
-            self.physical.init_cloud_probability()
-        # # check the physical model activated or not
-        # if not self.physical.activated:
-        #     print(
-        #         ">>> physical model has not been initialized due to inadquate absolute clear-sky pixels"
-        #     )
-        #     self.cloud.append(self.physical.pcp)
-        #     return
-
-        # display cloud probabilities from the physical rules
+        ## display cloud probabilities from the physical rules
         if self.show_figure:
+            #%% init cloud probabilities
+            if self.physical.activated is None:
+                self.physical.init_cloud_probability()
             # show water layer
             utils.show_simple_mask(self.physical.water, "Water")
             
@@ -813,97 +843,77 @@ class Fmask(object):
                 f"Cloud probability ({str(self.physical.options[0])[0]}{str(self.physical.options[1])[0]}{str(self.physical.options[2])[0]})"
             )
 
-        #%% create initial cloud mask by the machine learning model
-        # start to process normal imagery
+        ## start to process normal imagery
         # define the class label of the cloud and non-cloud, and filled pixels for the machine learning model
         label_cloud     = self.cloud_model_classes.index("cloud")
         label_noncloud  = self.cloud_model_classes.index("noncloud")
         label_filled    = self.cloud_model_classes.index("filled")
+        
+        # init cloud layer in bit layers
+        self.cloud = BitLayer(self.image.shape)
+        
+        # must make the init on physical rules
+        self.physical.init_cloud_probability()
 
+        # post-processing used predicators
+        # ndbi, ndvi, cdi (optional), tirs1 (optional), slope or dem (for mountain areas) remained for LPL only
+        if ("lightgbm" in self.base_machine_learning) and (self.tune_machine_learning == "lightgbm"):
+            predictors_post_tbs = ['ndbi', 'ndvi', 'cdi', 'tirs1', 'slope', 'dem']
+        else:
+            predictors_post_tbs = []
+
+        # load the pretrained machine learning models required accordingly
+        predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1'] # bands will be used in the shadow masking and the thermal band if it is available
+        if (("unet" in self.base_machine_learning) or (self.tune_machine_learning == "unet")):
+            predictors_tbs = predictors_tbs + self.unet_cloud.predictors
+        if (("lightgbm" in self.base_machine_learning) or (self.tune_machine_learning == "lightgbm")):
+            predictors_tbs = predictors_tbs + self.lightgbm_cloud.predictors
+
+        # exclude physical's from self.image.bands but keep the predictors for machine learning models, which will be used in the following classification and tuning process, and also for the post-processing to reduce the commission errors
+        self.drop_unused_image_bands(predictors_tbs)
+        
         # load the pretrained unet model if it will be used
         if C.MSG_FULL:
             print(f">>> loading {self.base_machine_learning} as base machine learning model")
             print(f">>> loading {self.tune_machine_learning} as tune machine learning model")
     
-        # load the pretrained machine learning models required accordingly
-        if (("unet" in self.base_machine_learning) or (self.tune_machine_learning == "unet")) and (not self.unet_cloud.activated):
-            self.unet_cloud.load_model()
-        if (("lightgbm" in self.base_machine_learning) or (self.tune_machine_learning == "lightgbm")) and (not self.lightgbm_cloud.activated):
-            self.lightgbm_cloud.load_model()
-            
-        
-        # masking initilized clouds
-        # if C.MSG_FULL:
-        #    print(f">>> initilizing cloud mask by {self.base_machine_learning}")
         # get the init mask created by the machine learning model
-        # single classifier is used as base machine learning model
+        # and single classifier is used as base machine learning model
         if "unet" in self.base_machine_learning:
-            cloud_ml, _ = self.unet_cloud.classify(probability="none")
+            if (not self.unet_cloud.activated):
+                self.unet_cloud.load_model()
+            cloud_ml, _ = self.unet_cloud.classify()
             cloud_ml[self.image.filled] = label_filled  # exclude the filled pixels by the real extent masking
-        elif "lightgbm" in self.base_machine_learning:
-            cloud_ml, _, subsampling_mask = self.lightgbm_cloud.classify(probability="none", base = True)
-            # exclude the filled pixels based on the subsampling mask, which is used to speed up the classification of lightgbm
-            cloud_ml[~subsampling_mask] = label_filled
+            self.cloud.append(cloud_ml == label_cloud) # append the unet base layer for further post processing to reduce commission errors
+            # prepare the lightgbm model for tuning
+            if (self.tune_machine_learning == "lightgbm"): 
+                del self.unet_cloud # clean up the self.unet_cloud
+                gc.collect() # collect the garbage to release the memory occupied by unet
+                # clean up the bands which will not be used anymore
+                predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1'] + self.lightgbm_cloud.predictors
+                self.drop_unused_image_bands(predictors_tbs)
+                if (not self.lightgbm_cloud.activated): # if we set the path of lightgbm model
+                    self.lightgbm_cloud.load_model()
 
-        
-        # # code of testing random forest to take the classification of physical rules as the input, based on the unet cloud mask
-        # from sklearn.ensemble import RandomForestClassifier
-        # from sklearn.datasets import make_classification
-        # # train a random forest classifier
-        # # randomly select 20000 pixels from the cloud_ml that are not filled
-        # rf_idx = np.where((cloud_ml != label_filled) & (self.image.obsmask))
-        # selected_indices = np.random.choice(len(rf_idx[0]), size=20000, replace=False)
-        # rf_idx = (rf_idx[0][selected_indices], rf_idx[1][selected_indices])
-        # rf_y = cloud_ml[rf_idx]
-        # # get the predictors from the physical model
-        # rf_x = np.zeros((len(rf_idx[0]), 3), dtype="float32")
-        # rf_x[:,0] = self.physical.prob_variation[rf_idx]
-        # rf_x[:,1] = self.physical.prob_temperature[rf_idx]
-        # rf_x[:,2] = self.physical.prob_cirrus[rf_idx]
-        # # train the random forest classifier
-        # rf_clf = RandomForestClassifier(n_estimators=100, random_state=42)
-        # rf_clf.fit(rf_x, rf_y)
-        # # predict the cloud mask for all the pixels that are not filled
-        # rf_x_all = np.zeros((self.image.shape[0], self.image.shape[1], 3), dtype="float32")
-        # rf_x_all[:,:,0] = self.physical.prob_variation
-        # rf_x_all[:,:,1] = self.physical.prob_temperature
-        # rf_x_all[:,:,2] = self.physical.prob_cirrus
-        # cloud_rf = cloud_ml.copy()
-        # cloud_rf[cloud_ml != label_filled] = rf_clf.predict(rf_x_all[cloud_ml != label_filled].reshape(-1, 3))
-        
-        # if self.show_figure:
-        #     utils.show_cloud_mask(
-        #         cloud_rf, self.cloud_model_classes, "Random Forest based on physical probabilities"
-        #     )
-        
+        elif "lightgbm" in self.base_machine_learning:
+            if (not self.lightgbm_cloud.activated):
+                self.lightgbm_cloud.load_model()
+            cloud_ml, _, _ = self.lightgbm_cloud.classify(base = True)
+            cloud_ml[self.image.filled] = label_filled  # exclude the filled pixels based on the subsampling mask, which is used to speed up the classification of lightgbm
+            # prepare the unet model for tuning
+            if (self.tune_machine_learning == "unet"): 
+                del self.lightgbm_cloud # clean up the self.lightgbm_cloud
+                gc.collect() # collect the garbage to release the memory occupied by lightgbm
+                # clean up the bands which will not be used anymore
+                predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1'] + self.unet_cloud.predictors
+                self.drop_unused_image_bands(predictors_tbs)
+                if (not self.unet_cloud.activated): # if we set the path of unet model
+                    self.unet_cloud.load_model()
+
         #%% iteract only when the cloud and non-cloud are both in the cloud_ml        
         count_cloud = np.count_nonzero(cloud_ml == label_cloud)
         count_noncloud = np.count_nonzero(cloud_ml == label_noncloud)
-        # when the pixel-based classifiers are used, we can consider the subsampling sizen to speed up the classification
-        if ("lightgbm" in self.base_machine_learning):
-            # one pixel represent the subsampling_size * subsampling_size pixels after using subsampling to speed up the classification of pixel-based classifiers
-            # back to the original number of pixels before subsampling
-            ratio_subsampling = self.image.obsnum/np.count_nonzero(cloud_ml != label_filled)
-            subsampling_mask = None # only when the first iteration, we do not need to use the subsampling mask because it was based on the random pixels selected for triggering the physical model
-            count_cloud = count_cloud*ratio_subsampling
-            count_noncloud = count_noncloud*ratio_subsampling
-            del ratio_subsampling
 
-         # record the cloud layer
-        if (outcome == "classified") or ((count_cloud < self.physical.min_clear) or (count_noncloud < self.physical.min_clear)):
-            # when outcome is classified,
-            # when either cloud or non-cloud is not represented in the initial cloud_ml, we do not do the interaction, just record the initial cloud_ml
-            self.cloud.append(cloud_ml == label_cloud)
-        # else: # we do not use this because we only record the physical outcome at the end when the physical model swift is made
-        #     self.physical.options = [
-        #         True,
-        #         True,
-        #         True,
-        #     ]  # make sure all the physical rules are activated at default
-        #     self.cloud.append(
-        #         self.physical.cloud
-        #     )  # get the default physical cloud mask
-           
         if self.show_figure:
             utils.show_cloud_mask(
                 cloud_ml, self.cloud_model_classes, "base: " + "".join(self.base_machine_learning)
@@ -914,170 +924,163 @@ class Fmask(object):
 
         # both cloud and non-cloud are represented enough in the cloud_ml
         if (count_cloud >= self.physical.min_clear) & (count_noncloud >= self.physical.min_clear):
-            # check the physical model activated or not
-            if not self.physical.activated:
-                print(
-                    ">>> physical model has not been initialized due to inadquate absolute clear-sky pixels"
-                )
-                # return the PCP pixels, and will do the post-processing for the cloud objects overlaying the UNet cloud layer
-                self.cloud.append(self.physical.pcp)
-                return
-        # if (count_cloud >= 1) & (count_noncloud >= 1):
-            # count the labels of cloud and non-cloud
-            # self-learning progress
-            for i in range(1, self.max_iteration + 1):
+            if not self.physical.activated: # check the physical model activated or not
                 if C.MSG_FULL:
-                    print(
-                        f">>> adjusting physical rules {i:02d}/{self.max_iteration:02d}"
-                    )
-
-                # select the seeds of cloud and non-cloud (which is not used for any further processing, just for information)
-                # if self.show_figure:
-                #    utils.show_seed_mask(
-                #        cloud_ml,
-                #        cloud_ml,
-                #        self.cloud_model_classes,
-                #        "Seed: " + "&".join(self.base_machine_learning),
-                #    )
-
-                # physical rules and Control to make the rules combined dynamically
-                if (i == 1) or self.physical_rules_dynamic: # i == 1 does not require the physical rules to be adjusted
+                    print(">>> physical model has not been initialized due to inadquate absolute clear-sky pixels")
+                self.cloud.append(self.physical.pcp) # return the PCP pixels, and will do the post-processing for the cloud objects overlaying the UNet cloud layer
+            else: # self-learning normal progress
+                for i in range(1, self.max_iteration + 1):
+                    if C.MSG_FULL:
+                        print(f">>> adjusting physical rules {i:02d}/{self.max_iteration:02d}")
+                    # physical rules and Control to make the rules combined dynamically
                     self.physical.set_options() # back to the default options, which means dynamically adjust the rules, on or off
-                else:  # only use the physical rules determined by the initilization when we do not need to adjust the rules anymore
-                    self.physical.set_options([options[0]], [options[1]], [options[2]])
 
-                # select the cloud probability layer by the physical rules
-                (prob_ph, options, thrd) = self.physical.select_cloud_probability(
-                    cloud_ml,
-                    label_cloud = label_cloud,
-                    label_noncloud = label_noncloud,
-                    show_figure = self.show_figure
-                )
-                # adjust the threshold by the threshold shift
-                thrd = max(0, thrd - self.physical.threshold_shift) # decrease the threshold to make sure more cloud pixels are included, but not too much
-                # mask cloud by the physical rules
-                cloud_ph = np.zeros(self.image.shape, dtype="uint8")
-                if label_noncloud != 0: # only when it is not zero, we update the mask of noncloud
-                    cloud_ph[prob_ph < thrd]= label_noncloud
-                # see overlap_cloud_probability, in which we counted this included to mask clouds
-                # have to be PCP pixels
-                cloud_ph[(prob_ph >= thrd) & self.physical.pcp] = label_cloud
-                # exclude extremely cold clouds when thermal band is available
-                if self.image.data.exist("tirs1"):
-                    cloud_ph[self.physical.cold_cloud] = label_cloud
-                # set the mask of non-observed pixels to filled
-                cloud_ph[self.image.filled] = label_filled
-
-                if self.show_figure:
-                    # make title with the options at the end (TTT)
-                    utils.show_cloud_probability(
-                        self.physical.prob_cloud,
-                        self.physical.image.filled,
-                        f"Cloud probability ({str(self.physical.options[0])[0]}{str(self.physical.options[1])[0]}{str(self.physical.options[2])[0]})"
-                    )
-                    utils.show_cloud_mask(
-                        cloud_ph, self.cloud_model_classes, "Physical rules"
+                    # select the cloud probability layer by the physical rules
+                    (prob_ph, thrd) = self.physical.select_cloud_probability(
+                        cloud_ml,
+                        label_cloud = label_cloud,
+                        label_noncloud = label_noncloud,
+                        show_figure = self.show_figure
                     )
 
-                # when the outcome is physical at the end, we do not run the machine learning classification one more time.
-                if (i == self.max_iteration) & (outcome == "physical"):
-                    self.cloud.append(cloud_ph == label_cloud)
-                    return
+                    if self.physical.phy_law:
+                        # mask cloud by the physical rules
+                        cloud_ph = np.zeros(self.image.shape, dtype="uint8")
+                        # only when it is not zero, we update the mask of noncloud
+                        if label_noncloud != 0:
+                            cloud_ph[prob_ph < thrd]= label_noncloud
+                        cloud_ph[(prob_ph >= thrd)] = label_cloud
+                        del prob_ph
 
-                # continue to classify and tune the machine learning model
-                if C.MSG_FULL:
-                    print(f">>> tunning machine learning model {i:02d}/{self.max_iteration:02d}")
-                # tune the unet and return the cloud mask and cloud probability layer by the updated model
-                if self.tune_machine_learning == "unet":
-                    (cloud_ml_update, _) = self.unet_cloud.tune(cloud_ph)  # as seed layer
-                elif (self.tune_machine_learning == "lightgbm"):
-                    # Exclude the place where the physical rules often make omission errors of cloud pixels.
-                    # Note commision errors are not considered here because post-processing will be made, such as UNet-based postprocess for UPU or morphology-based postprocess for LPL
-                    # 1. Non-cloud pixels near the cloud pixels, where the physical rules often make omission errors. In this case, the remaining non-cloud pixels far away from clouds still can serve as the training samples.
-                    if self.pixel_erosion_radius > 0:
-                        cloud_ph[(cloud_ph!=label_cloud) & utils.dilate(cloud_ph==label_cloud, radius = self.pixel_erosion_radius)] = label_filled
+                        # exclude extremely cold clouds when thermal band is available
+                        if self.image.data.exist("tirs1"):
+                            cloud_ph[self.physical.cold_cloud] = label_cloud
+                        # set the mask of non-observed pixels to filled
+                        cloud_ph[self.image.filled] = label_filled
 
-                    # update the training data, and retrain the pixel-based model
-                    # update the training data by replacing the samples
-                    if self.lightgbm_cloud.tune_update_rate > 0:
-                        self.lightgbm_cloud.sample.update(
-                            self.image.data.get(self.lightgbm_cloud.predictors),
-                            self.lightgbm_cloud.predictors,
-                            cloud_ph,
-                            label_cloud=label_cloud,
-                            label_fill=label_filled,
-                            number=int(
-                                self.lightgbm_cloud.tune_update_rate
-                                * self.lightgbm_cloud.sample.number
-                            ),
-                            method="replace",
+                        if self.show_figure:
+                            # make title with the options at the end (TTT)
+                            utils.show_cloud_probability(
+                                self.physical.prob_cloud,
+                                self.physical.image.filled,
+                                f"Cloud probability ({str(self.physical.options[0])[0]}{str(self.physical.options[1])[0]}{str(self.physical.options[2])[0]})"
+                            )
+                            utils.show_cloud_mask(
+                                cloud_ph, self.cloud_model_classes, "Physical rules"
+                            )
+                    else: # if the physical law is not satified, we use machine learning result
+                        if C.MSG_FULL:
+                            print(f">>> base machine learning layer is selected due to failure to pass the physical rule checks")
+                        del prob_ph
+
+                        # use cloud_ml to replace the cloud_ph
+                        cloud_ph = np.zeros(self.image.shape, dtype="uint8")
+                        if label_noncloud != 0: # use lablel_noncloud to update cloud_ph
+                            cloud_ph = cloud_ph + label_noncloud # default value is label_noncloud
+                        cloud_ph[cloud_ml == label_cloud] = label_cloud
+                        cloud_ph[self.image.filled] = label_filled # set the mask of non-observed pixels to filled
+
+                    # when the outcome is physical at the end, we do not run the machine learning classification one more time.
+                    if ((i == self.max_iteration) & (outcome == "physical")):
+                        # clean up the bands which will not be used anymore
+                        predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1']
+                        self.drop_unused_image_bands(predictors_tbs)
+                        if self.tune_machine_learning == "lightgbm":
+                            del self.lightgbm_cloud # clean up the machine learning models to save the memory
+                        elif self.tune_machine_learning == "unet": 
+                            del self.unet_cloud # clean up the machine learning models to save the memory
+                        gc.collect()
+                        self.cloud.append(cloud_ph == label_cloud)
+                        return
+
+                    # continue to classify and tune the machine learning model
+                    if C.MSG_FULL:
+                        print(f">>> tunning machine learning model {i:02d}/{self.max_iteration:02d}")
+                    # tune the unet and return the cloud mask and cloud probability layer by the updated model
+                 
+                    if (self.tune_machine_learning == "lightgbm"):
+                        # update the training data by replacing the samples
+                        if self.lightgbm_cloud.tune_update_rate > 0:
+                            self.lightgbm_cloud.sample.update(
+                                self.image.data.get(self.lightgbm_cloud.predictors),
+                                self.lightgbm_cloud.predictors,
+                                cloud_ph,
+                                label_cloud=label_cloud,
+                                label_fill=label_filled,
+                                number=int(
+                                    self.lightgbm_cloud.tune_update_rate
+                                    * self.lightgbm_cloud.sample.number
+                                ),
+                                method="replace",
+                            )
+                            # retrain the pixel-based model only when we have the samples updated
+                            self.lightgbm_cloud.train()
+                        (cloud_ml, _,_) = self.lightgbm_cloud.classify()
+                        del self.lightgbm_cloud # clean up the machine learning models to save the memory
+                    elif self.tune_machine_learning == "unet":
+                        (cloud_ml, _) = self.unet_cloud.tune(cloud_ph)  # as seed layer
+                        del self.unet_cloud # clean up the machine learning models to save the memory
+                    gc.collect() # collect the garbage to release the memory occupied by the machine learning model
+                    # exclude the filled pixels by the real extent masking
+                    cloud_ml[self.image.filled] = (
+                        label_filled  # set the mask of non-observed pixels to filled
+                    )
+
+                    if self.show_figure:
+                        utils.show_cloud_mask(
+                            cloud_ml, self.cloud_model_classes, self.tune_machine_learning
                         )
-                        # retrain the pixel-based model only when we have the samples updated
-                        self.lightgbm_cloud.train()
-                    (cloud_ml_update, _,_) = self.lightgbm_cloud.classify()
-                else: # in case of the default, but will not come to this line
-                    cloud_ml_update = cloud_ml.copy()
 
-                # exclude the filled pixels by the real extent masking
-                cloud_ml_update[self.image.filled] = (
-                    label_filled  # set the mask of non-observed pixels to filled
-                )
-
-                if self.show_figure:
-                    utils.show_cloud_mask(
-                        cloud_ml_update, self.cloud_model_classes, self.tune_machine_learning
-                    )
-
-                # disagreement between two layers and update the cloud mask
-                disagree_ml = (
-                    1
-                    - np.count_nonzero(
-                        (cloud_ml_update == cloud_ml) & self.image.obsmask
-                    )
-                    / self.image.obsnum
-                )
-                # update to the new cloud mask and cloud probability layer
-                cloud_ml = cloud_ml_update.copy()
-
-                # update the cloud mask by the machine learning model
-                if outcome == "classified":
-                    # make a buffer to connect the cloud pixels when the subsampling is used
-                    # this was designed to speed up the classification using pixel-based classifiers, but after testing, it will harm the classification results, so we do not use it
-                    if (self.tune_machine_learning == "lightgbm") and (self.lightgbm_cloud.subsampling_size > 1):
-                        self.cloud.append(utils.dilate(cloud_ml == label_cloud, radius=self.lightgbm_cloud.subsampling_size-1))
-                    else:
+                    # update the cloud mask by the machine learning model
+                    if outcome == "classified":
                         self.cloud.append(cloud_ml == label_cloud)
+                    else:
+                        self.cloud.append(cloud_ph == label_cloud)
+
+                    # reach to the end iteration
+                    if (i == self.max_iteration):
+                        # clean up the bands which will not be used anymore
+                        predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1']
+                        self.drop_unused_image_bands(predictors_tbs)
+                        if C.MSG_FULL:
+                            print(
+                                ">>> stop iterating at the end"
+                            )
+                        return
+
+                    # stop if the cloud and non cloud seed pixels are not enough to represent 
+                    count_cloud = np.count_nonzero(cloud_ml == label_cloud)
+                    count_noncloud = np.count_nonzero(cloud_ml == label_noncloud)
+                    if (count_cloud < self.physical.min_clear) | (count_noncloud < self.physical.min_clear):
+                        # clean up the bands which will not be used anymore
+                        predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1']
+                        self.drop_unused_image_bands(predictors_tbs)
+                        if C.MSG_FULL:
+                            print(
+                                f">>> stop iterating with less representive seed pixels for cloud = {count_cloud} for noncloud = {count_noncloud}"
+                            )
+                        return
+        else:
+            if (outcome == "classified"): # when outcome is classified
+                self.cloud.append(cloud_ml == label_cloud)
+            else: # return the physical model's layer
+                if not self.physical.activated: # check the physical model activated or not
+                    if C.MSG_FULL:
+                        print(">>> physical model has not been initialized due to inadquate absolute clear-sky pixels")
+                    self.cloud.append(self.physical.pcp) # return the PCP pixels, and will do the post-processing for the cloud objects overlaying the UNet cloud layer
                 else:
-                    self.cloud.append(cloud_ph == label_cloud)
+                    self.physical.options = [ True, True, True]  # make sure all the physical rules are activated at default
+                    cloud_phy_default = self.physical.cloud
+                    if self.image.data.exist("tirs1"):
+                        cloud_phy_default[self.physical.cold_cloud] = True
+                    self.cloud.append(cloud_phy_default)  # get the default physical cloud mask
+                    del cloud_phy_default
+        
+        # clean up the bands which will not be used anymore
+        predictors_tbs = P.predictor_shadow + predictors_post_tbs + ['tirs1']
+        self.drop_unused_image_bands(predictors_tbs)
 
-                # reach to the end iteration
-                if (i == self.max_iteration):
-                    if C.MSG_FULL:
-                        print(
-                            ">>> stop iterating at the end"
-                        )
-                    return
-
-                # stop by the disagreement rate
-                if disagree_ml < self.disagree_rate:
-                    if C.MSG_FULL:
-                        print(
-                            f">>> stop iterating with disagreement = {disagree_ml:.2f} less than {self.disagree_rate}"
-                        )
-                    return
-
-                # stop if the cloud and non cloud seed pixels are not enough to represent 
-                count_cloud = np.count_nonzero(cloud_ml == label_cloud)
-                count_noncloud = np.count_nonzero(cloud_ml == label_noncloud)
-                if (count_cloud < self.physical.min_clear) | (count_noncloud < self.physical.min_clear):
-                    if C.MSG_FULL:
-                        print(
-                            f">>> stop iterating with less representive seed pixels for cloud = {count_cloud} for noncloud = {count_noncloud}"
-                        )
-                    return
-
-
-    def mask_cloud_unet(self, probability="cloud") -> None:
+    def mask_cloud_unet(self, probability="default") -> None:
         """mask clouds by UNet
 
         Args:
@@ -1090,22 +1093,23 @@ class Fmask(object):
         if self.show_figure: # show the cloud mask and cloud probability figures
             _cloud, prob_ml = self.unet_cloud.classify(probability=probability)
         else: # force to none
-            _cloud, _ = self.unet_cloud.classify(probability="none")
+            _cloud, _ = self.unet_cloud.classify(probability=probability)
         # append cloud layer
         self.cloud.append(
             _cloud == self.unet_cloud.classes.index("cloud")
-        )  # make the cloud mask as binary, in which 1 is cloud and 0 is non-cloud
-        
+        ) # make the cloud mask as binary, in which 1 is cloud and 0 is non-cloud
+
         # show the cloud mask and cloud probability figures at the end
         if self.show_figure:
             cloud_mask = self.cloud.last.astype("uint8")
             cloud_mask[self.image.filled] = self.cloud_model_classes.index("filled")
             utils.show_cloud_mask(cloud_mask, self.cloud_model_classes, "UNet")
-            utils.show_cloud_probability(
-                prob_ml, self.unet_cloud.image.filled, "Cloud Probability"
-            )
+            if probability != "none":
+                utils.show_cloud_probability(
+                    prob_ml, self.unet_cloud.image.filled, "Cloud Probability"
+                )
 
-    def mask_cloud_lightgbm(self, probability="cloud") -> None:
+    def mask_cloud_lightgbm(self, probability="default") -> None:
         """
         Masks clouds in the image using LightGBM.
         This method initializes the LightGBM model if it is not already activated,
@@ -1133,7 +1137,7 @@ class Fmask(object):
             )  # the cloud probability layer, its definition is based on the classes
         else: # just cloud layer returned
             (_cloud, _, _) = self.lightgbm_cloud.classify(
-                probability="none" # no need to process the cloud probability layer
+                probability=probability # no need to process the cloud probability layer
             )
         # append to the final cloud layer
         self.cloud.append(
@@ -1148,6 +1152,7 @@ class Fmask(object):
             utils.show_cloud_probability(
                 prob_ml, self.unet_cloud.image.filled, "Cloud Probability"
             )
+            utils.show_cloud_probability_hist(prob_ml[cloud_mask==self.cloud_model_classes.index("cloud")], prob_ml[cloud_mask==self.cloud_model_classes.index("noncloud")], [0, 1] , title = 'LightGBM probability')
 
     def display_predictor(self, band, title=None, percentiles=None) -> None:
         """
@@ -1259,7 +1264,7 @@ class Fmask(object):
         # create the directory if it does not exist
         Path(self.image.destination).mkdir(parents=True, exist_ok=True)
         utils.save_raster(
-            emask.astype("uint8"),
+            emask, #.astype("uint8"), # no need here
             profile,
             os.path.join(
                 self.image.destination, self.image.name + "_" + endname.upper() + ".tif"
@@ -1267,7 +1272,6 @@ class Fmask(object):
         )
         if C.MSG_FULL:
             print(f">>> saved fmask layer as geotiff to {self.image.destination}")
-        
 
     def save_model_metadata(self, path, running_time=0.0) -> None:
         """save model's metadata to a CSV file
@@ -1286,6 +1290,8 @@ class Fmask(object):
                     "temperature_hot": self.physical.options[1],
                     "cirrus": self.physical.options[2],
                     "threshold": self.physical.threshold,
+                    "phy_law": self.physical.phy_law,
+                    "seedoverlap": self.physical.seedoverlap, # overlap between ML-cloud and noncloud seeds in physical rule space
                     "running_time": running_time,
                 }
             ],
@@ -1297,7 +1303,6 @@ class Fmask(object):
         df_accuracy.to_csv(path)
         if C.MSG_FULL:
             print(f">>> saved metadata as csv file to {path}")
-        
 
     def save_accuracy(self, dataset, path, running_time=0.0, shadow=False):
         """Saves the accuracy metrics of the cloud and shadow masks to a CSV file.
@@ -1402,7 +1407,7 @@ class Fmask(object):
         print(df_accuracy)
         df_accuracy.to_csv(path)
 
-    def mask_shadow_flood(self, topo='SCS', threshold = 0.15):
+    def mask_shadow_flood(self, topo='SCS', threshold = 0.2):
         """
         Mask cloud shadows based on the flood method.
         Args:
@@ -1419,8 +1424,8 @@ class Fmask(object):
                 threshold = threshold,
             )
         else:
-            slope = utils.gen_slope(self.image.profile)
-            aspect = utils.gen_aspect(self.image.profile)
+            slope = utils.gen_slope(self.image.profile, nthreads=self.nthreads)
+            aspect = utils.gen_aspect(self.image.profile, nthreads=self.nthreads)
             if self.show_figure:
                 # to show the orginal and topo-corrected bands
                 percentiles = [2, 98]
@@ -1458,14 +1463,17 @@ class Fmask(object):
                                          nir_background = nir_background,
                                          swir1_background = swir1_background)
 
-    def mask_shadow_geometry(self, potential="flood", topo = 'SCS', thermal_adjust = True, threshold = 0.15):
+    def mask_shadow_geometry(self, potential="flood", topo = 'SCS', dilation_spectral_size=21, dilation_spectral_region='outside', thermal_adjust = True, threshold = 0.2):
         """
         Masks the shadow in the image using the specified potential algorithms.
 
         Args:
-            potential (str or list, optional): Potential shadow detection algorithm(s) to use.
-                If None, both "unet" and "flood" algorithms will be used. Defaults to None.
-            false_cloud_layer (int, optional): The false layer value. Defaults to 0.
+            potential (str, optional): The potential algorithm to use for shadow masking. Valid options are "flood", "unet", and "both". Defaults to "both".
+            topo (str, optional): Topographic correction method for the flood algorithm. Defaults to 'SCS'. None means does not apply topographic correction.
+            dilation_spectral_size (int, optional): The size of dilation for the shadow mask. Defaults to 0, which means no dilation.
+            dilation_spectral_region (str, optional): The region to apply dilation. Valid options are "outside" and "all". Defaults to "outside".
+            thermal_adjust (bool, optional): Whether to adjust the shadow mask based on thermal information. Defaults to True.
+            threshold (float, optional): The threshold for shadow detection. Defaults to 0.2.
         Returns:
             None
 
@@ -1483,6 +1491,7 @@ class Fmask(object):
                 if C.MSG_FULL:
                     print(">>> masking potential cloud shadow by flood-fill")
                 shadow_mask_binary = self.mask_shadow_flood(topo=topo, threshold = threshold)
+                self.image.data.drop(["nir", "swir1"]) # clean up the bands which will not be used anymore
             elif ialg.lower() == "unet":
                 pass # TBD
             # add the shadow mask to the potential shadow mask
@@ -1506,9 +1515,34 @@ class Fmask(object):
             self.physical.water,
             thermal_adjust = thermal_adjust
         )
-        
-        # delete self.cloud_region, self.cloud_object, pshadow
-        del self.cloud_region, self.cloud_object, pshadow
+        # force to clean up self.cloud_object and self.cloud_region to save the memory
+        del self.cloud_object, self.cloud_region
+        gc.collect()
+    
+        # keep the inner shadow pixels, but only keep the outer shadow pixels when they are overlaid with the potential shadow mask, which is more conservative to avoid over-masking the shadow
+        if dilation_spectral_size > 0:
+            pshadow = pshadow.astype(bool) # convert to boolean for the following operation
+            # use erosion and dilation, with square-shape to remove the line-shaped potential shadow, such narrow rivers, which are not likely to be the real shadow, and then we will only keep the potential shadow pixels when they are overlaid with the shadow mask after dilation, which is more conservative to avoid over-masking the shadow
+            # this will also remove the small parts of real shadow, but this does not impact the final results, since we will keep the inner shadow pixels, and only keep the outer shadow pixels when they are overlaid with the potential shadow mask, which is more conservative to avoid over-masking the shadow
+            radius_pixels = int(round(100 / self.image.resolution))  # remove narrow river-like features below ~200 m width, based on visual examination
+            pshadow_mor = utils.erode(pshadow, radius_pixels, structure='square') # remove line-shaped potential shadow with square structure
+            pshadow_mor = utils.dilate(pshadow_mor, radius_pixels + 2, structure='square')  # +2 recover as much valid shadow extent as possible after erosion
+            pshadow = pshadow & pshadow_mor # overlap the original potential shadow with the morphologically processed potential shadow to remove the line-shaped potential shadow
+            del pshadow_mor
+
+            if dilation_spectral_region == 'outside':
+                shadow_dilated = utils.dilate(self.shadow, dilation_spectral_size) # fill the holes of the shadow mask by dilation, caused by the projection of shadows
+                shadow_core = utils.dilate(self.shadow, 3) # to fill the holes caused by the shadow projection, with square structure
+                shadow_outside = shadow_dilated & ~shadow_core & pshadow # only keep the pixels when they are overlaid with the potential shadow mask
+                del shadow_dilated
+                self.shadow = utils.propagate(shadow_core, shadow_core | shadow_outside)
+                del shadow_core, shadow_outside
+            elif dilation_spectral_region == 'all':
+                shadow_dilated = utils.dilate(self.shadow, dilation_spectral_size) # fill the holes of the shadow mask by dilation, caused by the projection of shadows
+                self.shadow = shadow_dilated & pshadow # only keep the pixels when they are overlaid with the potential shadow mask
+                del shadow_dilated
+        del pshadow
+        gc.collect()
 
     def display_fmask(self, endname = "", path=None, skip=True):
         """display the fmask, with clear, cloud, shadow, and fill"""
@@ -1574,7 +1608,7 @@ class Fmask(object):
         elif algorithm == "interaction":
             self.mask_cloud_interaction()
 
-    def __init__(self, image_path: str = "", algorithm: str = "interaction", base: str = "unet", tune: str = "lightgbm", loadmodel: bool = True, dcloud = 0, dshadow = 5, dsnow = 0):
+    def __init__(self, image_path: str = "", algorithm: str = "interaction", base: str = "unet", tune: str = "lightgbm", loadmodel: bool = True, dcloud = 0, dshadow = 5, dsnow = 0, nthreads = 1):
         """
         Initialize the Fmask object.
 
@@ -1587,7 +1621,7 @@ class Fmask(object):
         Returns:
         - None
         """
-        # set the package directory as the root for accessing base pre-trained models
+        # set the package directory, which is the parent directory of the current file, as the root, to access the base pre-trained models
         self.dir_package = _get_data_root()
 
        # Initialize image object containing base information on this image
@@ -1601,6 +1635,7 @@ class Fmask(object):
         self.buffer_cloud = dcloud
         self.buffer_shadow = dshadow # the buffer size of shadow in pixels, which is larger than the original size, 3 by 3 pixels, since the larger dilation size is able better to fill the holes caused by the projection of clouds (to match shadow)
         self.buffer_snow = dsnow
+        self.nthreads = nthreads
 
         # which algorithm will be used for cloud masking
         self.algorithm = algorithm
