@@ -1543,14 +1543,18 @@ def match_cloud2shadow(
     for icloud, cloud in enumerate(cloud_regions):
         # print('Cloud: ', icloud)
         # down-sampling the big cloud object
+        sampling_triggered = False
         if (sampling_cloud > 0) and (cloud.area > sampling_cloud):
             # total random sampling pixels
+            sampling_triggered = True
             csampling = np.random.choice(cloud.coords.shape[0], sampling_cloud, replace=False)
-        else:
-            csampling = np.arange(cloud.coords.shape[0])
 
         # copy the cloud coords since these information will be varied during the progress of matching cloud shadow
         cloud_coords = cloud.coords.copy()
+        if sampling_triggered:
+            cloud_coords_sampled = cloud_coords[csampling]
+        else:
+            cloud_coords_sampled = cloud_coords
         
         # in meters. 200m to 12km for cloud height usually
         cloud_height_min, cloud_height_max = 200.00 + ele_base, 12000.00 + ele_base # over the base elevation in the imagery
@@ -1562,6 +1566,10 @@ def match_cloud2shadow(
         if thermal_included:
             # Obtain thermal values for the cloud object
             cloud_temp = thermal[cloud_coords[:, 0], cloud_coords[:, 1]]
+            if sampling_triggered:
+                cloud_temp_sampled = cloud_temp[csampling]
+            else:
+                cloud_temp_sampled = cloud_temp
 
             cloud_temp, cloud_temp_base, cloud_height_min, cloud_height_max = refine_cloud_thermal_properties(
                 cloud_temp, cloud_radius, num_edge_pixels, 
@@ -1606,6 +1614,12 @@ def match_cloud2shadow(
         cloud_view_azimuth = np.deg2rad(
             view_azimuth[cloud_coords[:, 0], cloud_coords[:, 1]]
         )  # in radian
+        if sampling_triggered:
+            cloud_view_zenith_sampled = cloud_view_zenith[csampling]
+            cloud_view_azimuth_sampled = cloud_view_azimuth[csampling]
+        else:
+            cloud_view_zenith_sampled = cloud_view_zenith
+            cloud_view_azimuth_sampled = cloud_view_azimuth
 
         # iterate the cloud height from cloud_height_min to cloud_height_max
         for cloud_base_height in np.arange(
@@ -1614,19 +1628,19 @@ def match_cloud2shadow(
             # when thermal available, create 3D cloud object with the cloud height according to the thermal band
             if thermal_included:
                 cloud_height = (
-                    cloud_temp_base - cloud_temp[csampling]
+                    cloud_temp_base - cloud_temp_sampled
                 ) * rate_elapse + cloud_base_height
             else:
                 cloud_height = cloud_base_height # no 3D cloud object
 
             # make it as new variable to keep the original cloud object
-            coords = cloud_coords[csampling]
+            coords = cloud_coords_sampled.copy()
             # calculate the cloud's coords
             coords = shift_by_sensor(
                 coords,
                 cloud_height,
-                cloud_view_zenith[csampling],
-                cloud_view_azimuth[csampling],
+                cloud_view_zenith_sampled,
+                cloud_view_azimuth_sampled,
                 resolution,
             )
 
@@ -2792,4 +2806,3 @@ class Physical:
         self.overlap = overlap  # 0% overlap increasing compared to the previous test to alter the physical models
         # extremely cold cloud
         self.threshold_cold_cloud = 35  # in degree
-        self.nthreads = nthreads
