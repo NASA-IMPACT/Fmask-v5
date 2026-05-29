@@ -495,4 +495,3 @@ def main(model, dcloud, dshadow, dsnow, imagepath, output, skip_existing, save_m
 
 # main port to run the fmask by command line
 if __name__ == "__main__":
-    main()
