@@ -558,11 +558,18 @@ class LightGBM(object):
         labs_model = self.model.classes_
         image_predictors = self.predictors.copy()  # copy the predictors
         point_predictors = None
+        probability_index = None
         # exclude the 'latitude' and 'longitude' from the predictors, which are not used in image data
         if "latitude" in image_predictors:
             image_predictors.remove("latitude")
             image_predictors.remove("longitude")
             point_predictors = ["latitude", "longitude"] # do not vary the order of latitude and longitude, since it is used in the model
+        if probability == "noncloud":
+            probability_index = self.classes.index("noncloud")
+        elif probability == "cloud":
+            probability_index = self.classes.index("cloud")
+
+        image_data = self.image.data.get(image_predictors)
 
         # classify the image by the model with subsets of the image
         for idx in range(0, len(sample_image_row_all), 1000000):
@@ -572,33 +579,22 @@ class LightGBM(object):
             sample_image_col = sample_image_col_all[idx:idx_end]
             if point_predictors: # image-based predictors + latitude + longitude
                 n_pixels = len(sample_image_row)
-                pro_pred = self.model.predict_proba((np.concatenate((self.image.data.get(image_predictors)[:, sample_image_row, sample_image_col], np.full((1, n_pixels), self.image.lat_center, dtype=np.float32), np.full((1, n_pixels), self.image.lon_center, dtype=np.float32)), axis=0)).T, n_jobs=0)
+                pro_pred = self.model.predict_proba((np.concatenate((image_data[:, sample_image_row, sample_image_col], np.full((1, n_pixels), self.image.lat_center, dtype=np.float32), np.full((1, n_pixels), self.image.lon_center, dtype=np.float32)), axis=0)).T)
             else: # only image-based predictors
-                pro_pred = self.model.predict_proba((self.image.data.get(image_predictors)[:,sample_image_row, sample_image_col]).T, n_jobs=0)
+                pro_pred = self.model.predict_proba((image_data[:,sample_image_row, sample_image_col]).T)
             
-            label_pred = labs_model[np.argmax(pro_pred, axis=1)]
-
-            # update fmask with the true label classified
-            for lb in labs_model:
-                image_class[
-                    sample_image_row[label_pred == lb],
-                    sample_image_col[label_pred == lb],
-                ] = lb
-            # Free memory
-            del label_pred
+            image_class[sample_image_row, sample_image_col] = labs_model[np.argmax(pro_pred, axis=1)]
 
             # update the image_prob
             if image_prob is not None:
                 # get the highest score no matter what the class is
                 if probability == "default":
                     pro_pred = np.max(pro_pred, axis=1)
-                elif probability == "noncloud":
-                    pro_pred = pro_pred[:, self.classes.index("noncloud")]
-                elif probability == "cloud":
-                    pro_pred = pro_pred[:, self.classes.index("cloud")]
+                elif probability_index is not None:
+                    pro_pred = pro_pred[:, probability_index]
                 # update the image_prob
                 image_prob[sample_image_row, sample_image_col] = pro_pred
-            # Free memory
+            # free memory
             del pro_pred
         
         # set up the image-based classification probability's mean value, which will be used as indicator to decide the machine learning prediction is reliable
