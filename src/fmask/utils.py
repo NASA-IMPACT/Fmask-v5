@@ -421,34 +421,29 @@ def topo_correct_scs(band_ori1, band_ori2, sun_elevation_deg, sun_azimuth_deg, s
         numpy.ndarray: Corrected band data.
     """
 
-    # Convert angles to radians
-    # Convert solar elevation angle to solar zenith angle
+    # Convert solar elevation to zenith and precompute trigonometric terms once.
     sun_zenith_rad = np.radians(90 - sun_elevation_deg)
     sun_zenith_cos = np.cos(sun_zenith_rad)
     sun_zenith_sin = np.sin(sun_zenith_rad)
-    del sun_zenith_rad
 
     slope_rad = np.radians(slope_data)
+    cos_slope = np.cos(slope_rad)
+    sin_slope = np.sin(slope_rad)
     aspect_rad = np.radians(sun_azimuth_deg - aspect_data)
 
-    # Calculate cos_sita: the cosine of the angle between sun and surface normal
-    cos_sita = (sun_zenith_cos * np.cos(slope_rad) +
-                sun_zenith_sin * np.sin(slope_rad) * np.cos(aspect_rad))
+    # Calculate cos_sita: the cosine of the angle between sun and surface normal.
+    cos_sita = sun_zenith_cos * cos_slope + sun_zenith_sin * sin_slope * np.cos(aspect_rad)
+    del aspect_rad, sin_slope, sun_zenith_sin
 
     # Create a mask to check if the correction should be applied Ref. Tan et al. RSE (2013)
     cor_mask = np.abs(cos_sita - sun_zenith_cos) > 0.05
     if np.any(cor_mask):
-        # Apply the correction to the band only where cor_mask is True
-        band_corrected1 = band_ori1.copy()
-        band_corrected1[cor_mask] = (
-                band_ori1[cor_mask] * 
-                (np.cos(slope_rad[cor_mask]) * sun_zenith_cos) / cos_sita[cor_mask]
-            )
-        band_corrected2 = band_ori2.copy()
-        band_corrected2[cor_mask] = (
-                band_ori2[cor_mask] * 
-                (np.cos(slope_rad[cor_mask]) * sun_zenith_cos) / cos_sita[cor_mask]
-            )
+        # Apply one shared correction factor to both bands at valid correction pixels.
+        correction = (cos_slope[cor_mask] * sun_zenith_cos) / cos_sita[cor_mask]
+        band_corrected1 = band_ori1 # .copy()
+        band_corrected1[cor_mask] = band_ori1[cor_mask] * correction
+        band_corrected2 = band_ori2 # .copy()
+        band_corrected2[cor_mask] = band_ori2[cor_mask] * correction
         return band_corrected1, band_corrected2
     else:
         return band_ori1, band_ori2
@@ -573,7 +568,7 @@ def imfill(data, obsmask, fill_value=None):
     # del obsmask_eroded
 
     # fill the data
-    # a “seed” image, which specifies the values that spread, and a "data" (or "mask") image, which gives the maximum allowed value at each pixel
+    # a "seed" image, which specifies the values that spread, and a "data" (or "mask") image, which gives the maximum allowed value at each pixel
     
     # Check the assertion
     # assert np.all(seed <= data), "Error: seed must be <= data for erosion."
@@ -1216,9 +1211,8 @@ def normalize_image(image, **kwargs):
         image_valid = image.ravel()
     else:
         image_valid = image[obsmask]
-
-    # `np.percentile` changed in NumPy version 1.22.0: the “interpolation” argument is now called “method”.
-
+    
+    # `np.percentile` changed in NumPy version 1.22.0: the "interpolation" argument is now called "method".
     if np.__version__ >= '1.22.0':
         [min_val, max_val] = np.percentile(
             image_valid, percentile_range, method='linear')
@@ -1261,7 +1255,9 @@ def normalize_datacube(datacube, **kwargs):
     srange = kwargs.get("srange", [-1, 1])
     obsmask = kwargs.get("obsmask", None)
     copy = kwargs.get("copy", True)
+    
     _datacube = datacube.copy() if copy else datacube # not to alter the orginal values by default
+   
     if C.MSG_FULL:
         print(f">>> normalizing the datacube to {srange} with percentiles {percentiles}")
     # rescale the data cube
@@ -1895,5 +1891,3 @@ def clean_diff(diff, min_len):
     
     mask_keep = np.isin(labeled, keep_labels)
     return mask_keep.astype(np.uint8)
-
-# End-of-file (EOF)
