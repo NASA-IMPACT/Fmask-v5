@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fmask"
-version = "5.0.1"
+version = "5.0.2"
 description = "Cloud and cloud shadow detection for Landsat 4-9 and Sentinel-2"
 requires-python = ">=3.10"
 license = { text = "MIT" }

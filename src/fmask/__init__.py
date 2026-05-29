@@ -4,7 +4,7 @@ from importlib.machinery import ModuleSpec as _ModuleSpec
 
 from ._paths import FMASK_DATA_ENV, get_data_root
 
-__version__ = "5.0.1"
+__version__ = "5.0.2"
 
 # ---------------------------------------------------------------------------
 # Pickle compatibility
