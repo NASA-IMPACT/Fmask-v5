@@ -46,27 +46,28 @@ from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lp
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")
 @click.option("--dcloud", "-c", type=int, help="Dilation for cloud mask in pixels", default=0)
 @click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=5)
-@click.option("--dsnow", "-n", type=int, help="Dilation for shadow mask in pixels", default=0)
+@click.option("--dsnow", "-n", type=int, help="Dilation for snow mask in pixels", default=0)
 @click.option(
     "--imagedir", "-i",
     type=str,
     help="Directory containing Landsat/Sentinel-2 images. Supports multiple images.",
-    default="/scratch/shq19004/CMIX2/Phase2/multi-temporal/S2/L1C/equatorial_guinea",
+    default=".",
 )
 @click.option(
     "--output", "-o",
     type=str,
     help="Destination directory for results. If not provided, results are saved in the resource directory.",
-    default="/scratch/shq19004/CMIX2/Phase2Fmask/S2/L1C/equatorial_guinea",
+    default="",
 )
 @click.option("--skip_existing", "-s", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Skip processing if results already exist (set to 0 to force generation).", default="yes")
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="yes")
 @click.option("--display_fmask", "-df", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save the Fmask result as a PNG file.", default="yes")
 @click.option("--display_image", "-di", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save color composite images as PNG files.", default="yes")
 @click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="no")
+@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Value 0 uses all available cores.", default=0)
 @click.option("--ci", "-ci", type=int, help="The core's id", default=1)
 @click.option("--cn", "-cn", type=int, help="The number of cores", default=1)
-def main(model, dcloud, dshadow, dsnow, imagedir, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, ci, cn) -> None:
+def main(model, dcloud, dshadow, dsnow, imagedir, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, ci, cn, nthreads) -> None:
 
     skip_existing = True if skip_existing.lower() == "yes" else False
     save_metadata = True if save_metadata.lower() == "yes" else False
@@ -107,31 +108,31 @@ def main(model, dcloud, dshadow, dsnow, imagedir, output, skip_existing, save_me
         if model.upper() == 'UPL': # UNet-Physical-LightGBM recommnad for landsat 8-9 and sentinel 2
             fmask_upl(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'LPL': # LightGBM-Physical-LightGBM recommnad for landsat 4-7
             fmask_lpl(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'PHY': # Fmask 4.6
             fmask_physical(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'GBM': # LightGBM
             fmask_lightgbm(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'UNT': # UNet
             fmask_unet(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'UPU': # UNet-Physical-UNet
             fmask_upu(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         elif model.upper() == 'LPU': # LightGBM-Physical-UNet
             fmask_lpu(path_image = path_image, dcloud=dcloud, dshadow=dshadow, dsnow=dsnow,
                     destination = output, skip = skip_existing, 
-                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary)
+                    metadata = save_metadata, display_fmask = display_fmask, display_image = display_image, print_summary = print_summary, nthreads = nthreads)
         else:
             print(f"Model {model} is not supported.")
             return
