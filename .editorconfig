@@ -1,4 +1,4 @@
 root = true
 
 [*.py]
-end_of_line = crlf
+end_of_line = lf
