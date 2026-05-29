@@ -1073,38 +1073,41 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
             - PLANE_OFFSET (np.ndarray): Offset applied to plane coordinates to ensure they are positive.
     """
 
-    # get the coordinates of all the dem pixels
-    image_coords = np.argwhere(np.ones_like(ele, dtype=bool))
-    # image_coords = np.indices(ele.shape).reshape(2, -1).T  # Faster than np.argwhere
-    # Separate coordinates for odd and even indices for both row and column, in order to reduce it happens that mutiple image_coords for the same plane_coords (projected)
-    image_coords_odd = image_coords[(image_coords[:, 0] % 2 == 1) & (image_coords[:, 1] % 2 == 1)]  # Odd rows and odd columns
-    image_coords_even = image_coords[(image_coords[:, 0] % 2 == 0) & (image_coords[:, 1] % 2 == 0)]  # Even rows and even columns
+    # Build coordinates with indices directly and split odd/even by parity.
+    rows, cols = np.indices(ele.shape)
+    rows = rows.ravel()
+    cols = cols.ravel()
+    odd_mask = ((rows & 1) == 1) & ((cols & 1) == 1)
+    even_mask = ((rows & 1) == 0) & ((cols & 1) == 0)
+    image_coords_odd = np.column_stack((rows[odd_mask], cols[odd_mask]))
+    image_coords_even = np.column_stack((rows[even_mask], cols[even_mask]))
+
+    # Precompute radians once to avoid repeated conversions in inner computations.
+    sensor_zenith_rad = np.deg2rad(sensor_zenith)
+    sensor_azimuth_rad = np.deg2rad(sensor_azimuth)
+
+    # keep the argument for API compatibility
+    _ = nthreads
 
     # adjust the shift by sensor
-    nthreads = max(1, int(nthreads))
-    batch_size = 1000000
-
-    n_total = image_coords_odd.shape[0]
-    starts = list(range(0, n_total, batch_size))
-
-    def _process_odd_chunk(start):
-        batch = image_coords_odd[start:min(start + batch_size, n_total)]
-        return shift_by_sensor(
-            batch.copy(),
-            ele[batch[:, 0], batch[:, 1]],
-            np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]),
-            np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]),
-            resolution,
-        )
-
-    if len(starts) > 1 and nthreads > 1:
-        with ThreadPoolExecutor(max_workers=nthreads) as executor:
-            shifts = list(executor.map(_process_odd_chunk, starts))
-    else:
-        shifts = [_process_odd_chunk(start) for start in starts]
-    image_coords_odd_shift = np.vstack(shifts)
-    del shifts
-
+    image_coords_odd_shift = shift_by_sensor(
+        image_coords_odd.copy(),
+        ele[image_coords_odd[:, 0], image_coords_odd[:, 1]],
+        sensor_zenith_rad[image_coords_odd[:, 0], image_coords_odd[:, 1]],
+        sensor_azimuth_rad[image_coords_odd[:, 0], image_coords_odd[:, 1]],
+        resolution,
+    )
+    
+    # adjust the shift by sensor
+    image_coords_even_shift = shift_by_sensor(
+        image_coords_even.copy(),
+        ele[image_coords_even[:, 0], image_coords_even[:, 1]],
+        sensor_zenith_rad[image_coords_even[:, 0], image_coords_even[:, 1]],
+        sensor_azimuth_rad[image_coords_even[:, 0], image_coords_even[:, 1]],
+        resolution,
+    )
+    del sensor_zenith_rad, sensor_azimuth_rad # that can be deleted after the shift by sensor, because they will not be used any more
+    
     # image_coords_odd_shift = shift_by_sensor(
     #     image_coords_odd.copy(),
     #     ele[image_coords_odd[:, 0], image_coords_odd[:, 1]],
@@ -1113,12 +1116,15 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
     #     resolution,
     # )
     
+    solar_elevation_rad = np.deg2rad(solar_elevation)
+    solar_azimuth_rad = np.deg2rad(solar_azimuth)
+    
     # Projection along the solar direction for the first set of image coordinates
     plane_coords_odd = shift_by_solar(
         image_coords_odd_shift, # do not vary the values
         ele[image_coords_odd[:, 0], image_coords_odd[:, 1]],
-        np.deg2rad(solar_elevation).copy(),  # Convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # Convert to radiance
+        solar_elevation_rad,  # Convert to radiance
+        solar_azimuth_rad,  # Convert to radiance
         resolution,
     )
     
@@ -1131,37 +1137,15 @@ def project_dem2plane(ele, sensor_zenith, sensor_azimuth, solar_elevation, solar
     #     resolution,
     # )
     
-    # adjust the shift by sensor
-    n_total = image_coords_even.shape[0]
-    starts = list(range(0, n_total, batch_size))
-
-    def _process_even_chunk(start):
-        batch = image_coords_even[start:min(start + batch_size, n_total)]
-        return shift_by_sensor(
-            batch.copy(),
-            ele[batch[:, 0], batch[:, 1]],
-            np.deg2rad(sensor_zenith[batch[:, 0], batch[:, 1]]),
-            np.deg2rad(sensor_azimuth[batch[:, 0], batch[:, 1]]),
-            resolution,
-        )
-
-    if len(starts) > 1 and nthreads > 1:
-        with ThreadPoolExecutor(max_workers=nthreads) as executor:
-            shifts = list(executor.map(_process_even_chunk, starts))
-    else:
-        shifts = [_process_even_chunk(start) for start in starts]
-    image_coords_even_shift = np.vstack(shifts)
-    del shifts
-    
-    
     # Projection along the solar direction for the second set of image coordinates
     plane_coords_even = shift_by_solar(
         image_coords_even_shift, # do not vary the values
         ele[image_coords_even[:, 0], image_coords_even[:, 1]],
-        np.deg2rad(solar_elevation).copy(),  # Convert to radiance
-        np.deg2rad(solar_azimuth).copy(),  # Convert to radiance
+        solar_elevation_rad,  # Convert to radiance
+        solar_azimuth_rad,  # Convert to radiance
         resolution,
     )
+    del solar_elevation_rad, solar_azimuth_rad # that can be deleted after the shift by solar, because they will not be used any more
     
     # create new array to preserve the plane_coords as positive
     # Calculate PLANE_OFFSET before stacking
@@ -2808,3 +2792,4 @@ class Physical:
         self.overlap = overlap  # 0% overlap increasing compared to the previous test to alter the physical models
         # extremely cold cloud
         self.threshold_cold_cloud = 35  # in degree
+        self.nthreads = nthreads
