@@ -16,6 +16,7 @@ Changelog:
 import os
 import random
 import glob
+import warnings
 from pathlib import Path
 import re  # regular expression to find image names
 import numpy as np
@@ -27,15 +28,24 @@ import pandas
 from skimage.measure import block_reduce, label, regionprops
 from skimage.feature import local_binary_pattern
 from skimage.morphology import binary_dilation, binary_erosion, reconstruction
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 from . import constant as C
 from ._paths import get_data_root as _get_data_root
 from scipy.ndimage import convolve
 
 # ignore the invalid errors
 np.seterr(invalid='ignore') 
+warnings.filterwarnings(
+    "ignore",
+    message="Applying `local_binary_pattern` to floating-point images may give unexpected results when small numerical differences between adjacent pixels are present. It is recommended to use this function with images of integer dtype.",
+)
+
+
+def _get_matplotlib():
+    """Import matplotlib modules on demand to avoid eager import cost."""
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    return mpl, plt, ListedColormap
 
 # Use non-GUI backend only if running in Jupyter Notebook
 # Prevents X server errors when running in a headless environment
@@ -1404,6 +1414,7 @@ def show_image(rgb, title, path=None):
     Returns:
     None
     """
+    _, plt, _ = _get_matplotlib()
     plt.imshow(rgb, interpolation="nearest")
     plt.axis("off")
     plt.title(title)
@@ -1427,6 +1438,7 @@ def show_simple_mask(mask, title):
     Returns:
         None
     """
+    _, plt, _ = _get_matplotlib()
     plt.imshow(mask, cmap="gray", interpolation="none")
     plt.axis("off")
     plt.title(title)
@@ -1445,6 +1457,7 @@ def show_cloud_mask(cloud_mask, classes, title):
         None
     """
 
+    _, plt, ListedColormap = _get_matplotlib()
     # see color codes from https://colorbrewer2.org/#type=diverging&scheme=RdYlBu&n=5
     label_dict = ["Filled", "Non-\ncloud", "Cloud"]
     color_dict = {1: "#cccccc", 2: "#000000", 3: "#fdae61"}
@@ -1478,6 +1491,7 @@ def show_shadow_mask(shadow_mask, classes, title):
     None
     """
 
+    _, plt, ListedColormap = _get_matplotlib()
     # see color codes from https://colorbrewer2.org/#type=diverging&scheme=RdYlBu&n=5
     label_dict = ["Filled", "Non-\nshadow", "Shadow"]
     color_dict = {
@@ -1529,6 +1543,7 @@ def show_fmask(fmask, title, path=None, color_bar=False):
         None
     """
 
+    _, plt, ListedColormap = _get_matplotlib()
     # see color codes from https://colorbrewer2.org/#type=diverging&scheme=RdYlBu&n=5
     # https://a.atmos.washington.edu/~ovens/javascript/colorpicker.html
     label_dict = ["Filled", "Clear", "Shadow", "Cloud"]
@@ -1575,6 +1590,7 @@ def show_seed_mask(seed_mask, cloud_mask, classes, title):
     None
     """
 
+    _, plt, ListedColormap = _get_matplotlib()
     # see color codes from https://colorbrewer2.org/#type=diverging&scheme=RdYlBu&n=5
     label_dict = ["Filled", "Non-\nCloud", "Cloud", "Non-\nCloud\nSeed", "Cloud\nSeed"]
     color_dict = {1: "#cccccc", 2: "#abd9e9", 3: "#fdae61", 4: "#2c7bb6", 5: "#d7191c"}
@@ -1608,6 +1624,7 @@ def show_predictor(predictor, mask_filled, title, vrange = [0, 1]):
     Returns:
         None
     """
+    mpl, plt, _ = _get_matplotlib()
     if np.size(predictor) != np.size(mask_filled):
         pass # in case when Landsat 7 do not have the cirrus band and its prob.
         # raise ValueError("The size of the cloud probability and filled mask should be the same.")
@@ -1634,6 +1651,7 @@ def show_cloud_probability(cloud_prob, mask_filled, title):
     Returns:
         None
     """
+    mpl, plt, _ = _get_matplotlib()
     if np.size(cloud_prob) != np.size(mask_filled):
         pass # in case when Landsat 7 do not have the cirrus band and its prob.
         # raise ValueError("The size of the cloud probability and filled mask should be the same.")
@@ -1653,6 +1671,7 @@ def show_cloud_probability(cloud_prob, mask_filled, title):
         plt.show()
 
 def show_cloud_probability_hist(seed_cloud_prob, seed_noncloud_prob, prob_range, title = '', prob_bin=0.025):
+    _, plt, _ = _get_matplotlib()
     # calculate the density hist for each dataset with specified matching bin edges
     [prob_min, prob_max] = prob_range
     # in case when the prob_min is very close to prob_max, the bins will be empty
@@ -1891,3 +1910,5 @@ def clean_diff(diff, min_len):
     
     mask_keep = np.isin(labeled, keep_labels)
     return mask_keep.astype(np.uint8)
+
+# End-of-file (EOF)

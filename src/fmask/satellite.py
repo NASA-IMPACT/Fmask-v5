@@ -372,7 +372,7 @@ class Satellite:
         if band == "red":
             return self.saturation.get(2)
     
-    def load_data(self, predictors,nthreads=1):
+    def load_data(self, predictors, nthreads=1):
         """
         Loads the data for the satellite.
 
