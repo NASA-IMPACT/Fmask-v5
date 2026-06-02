@@ -45,7 +45,7 @@ from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lp
 @click.command()
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")
 @click.option("--dcloud", "-c", type=int, help="Dilation for cloud mask in pixels", default=0)
-@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=5)
+@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=0)
 @click.option("--dsnow", "-n", type=int, help="Dilation for snow mask in pixels", default=0)
 @click.option(
     "--imagedir", "-i",
@@ -63,10 +63,10 @@ from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lp
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="yes")
 @click.option("--display_fmask", "-df", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save the Fmask result as a PNG file.", default="yes")
 @click.option("--display_image", "-di", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save color composite images as PNG files.", default="yes")
-@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="no")
-@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Value 0 uses all available cores.", default=0)
+@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="yes")
 @click.option("--ci", "-ci", type=int, help="The core's id", default=1)
 @click.option("--cn", "-cn", type=int, help="The number of cores", default=1)
+@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Default single core. Value 0 uses all available cores.", default=0)
 def main(model, dcloud, dshadow, dsnow, imagedir, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, ci, cn, nthreads) -> None:
 
     skip_existing = True if skip_existing.lower() == "yes" else False
