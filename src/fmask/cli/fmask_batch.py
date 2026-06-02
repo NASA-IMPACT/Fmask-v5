@@ -13,12 +13,12 @@ Description:
 Batch processing of Landsat and Sentinel-2 images using Fmask 5. See details at fmask.py
 
 Usage examples:
-- python fmask.py --model=UPL --dcloud=3 --dshadow=5 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
+- python fmask.py --model=UPL --dcloud=1 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
 
 Command-line arguments:
 --model: the Fmask cloud detection model to use (PHY, GBM, UNT, LPL, UPU, LPU, UPL)
---dcloud: dilation for cloud mask in pixels; default is 3
---dshadow: dilation for shadow mask in pixels; default is 5
+--dcloud: dilation for cloud mask in pixels; default is 0
+--dshadow: dilation for shadow mask in pixels; default is 0
 --dsnow: dilation for snow mask in pixels; default is 0
 --output: destination directory for results; if not provided, results are saved in the image's directory
 --skip_existing: skip processing the image when its fmask layer exists; default is 'no'
@@ -28,7 +28,7 @@ Command-line arguments:
 --print_summary: print the summary of the Fmask result, including the percentage of cloud, shadow, snow, and clear; default is 'no'
 
 Changelog:
-- 5.0.1 (2025-10-23): 
+- 5.0.1 (2025-10-23):
     Algorithms described in detail by Qiu et al., 2026.
     Compared to 5.0.0, mainly added the Sen2Cloud+ dataset for ML training, and reduced image chip size from 512×512 to 256×256 to accommodate this dataset, and shifted image chips to maximize valid pixel coverage and mitigate edge effects in UNet models.
 
