@@ -27,9 +27,6 @@ lightgbm = "*"
 utm = "*"
 segmentation-models-pytorch = "*"
 
-[pypi-dependencies]
-fmask = { path = ".", editable = true }
-
 [package]
 name = "fmask"
 
