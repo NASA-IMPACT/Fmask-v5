@@ -36,8 +36,8 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from skimage.transform import resize
 import pyproj
-from bitlib import BitLayer
-from utils import (
+from .bitlib import BitLayer
+from .utils import (
     hot,
     whiteness,
     ndvi,
@@ -51,7 +51,7 @@ from utils import (
     normalize_datacube,
     fill_nan_wise
 )
-import constant as C
+from . import constant as C
 
 
 class Data:

@@ -18,8 +18,8 @@
 conda activate fmask 
 
 echo $SLURMD_NODENAME # display the node name
-cd ../
 
+FMASK_BATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../src/fmask/cli/fmask_batch.py"
 
 DCLOUD=3
 DSHADOW=5
@@ -30,17 +30,17 @@ DISPLAYIMG='yes'
 FOLDER_SRC='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Landsat89' # 1350 cores in total
 FOLDER_DES='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Landsat89FmaskDilate0GPU' # end names will be provided afterward
 MODEL='UPL'
-python fmask_batch.py --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
+python "$FMASK_BATCH" --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
 
 FOLDER_SRC='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Sentinel2' # 1350 cores in total
 FOLDER_DES='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Sentinel2FmaskDilate0GPU' # end names will be provided afterward
 MODEL='UPL'
-python fmask_batch.py --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
+python "$FMASK_BATCH" --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
 
 FOLDER_SRC='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Landsat47' # 1350 cores in total
 FOLDER_DES='/scratch/shq19004/ProjectCloudDetectionFmask5/Validation/Landsat47FmaskDilate0GPU' # end names will be provided afterward
 MODEL='LPL'
-python fmask_batch.py --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
+python "$FMASK_BATCH" --model=$MODEL --imagedir=$FOLDER_SRC --output=$FOLDER_DES --dcloud=$DCLOUD --dshadow=$DSHADOW --save_metadata=$SAVEMETA --ci=$SLURM_ARRAY_TASK_ID --cn=$SLURM_ARRAY_TASK_MAX --display_image=$DISPLAYIMG --display_fmask=$DISPLAYFMASK
 
 
 echo 'Finished!'

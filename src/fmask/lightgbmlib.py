@@ -8,9 +8,9 @@ import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import constant as C
+from . import constant as C
 import lightgbm as lgb
-from utils import collect_sample_pixel
+from .utils import collect_sample_pixel
 np.seterr(invalid='ignore') # ignore the invalid errors
 warnings.filterwarnings(
     "ignore",
@@ -431,7 +431,7 @@ class LightGBM(object):
                                    min_data_in_leaf = self.min_data_in_leaf,
                                    n_estimators=self.ntrees,
                                    random_state = C.RANDOM_SEED,
-                                   n_jobs  = self.nthreads, # only use 1 core to process, since we can use parallel processing for each individual image
+                                   n_jobs  = self.nthreads,
                                    verbose = -1) # no verbose, do not show the warnings in the progress
     
         if (

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fmask"
+version = "5.0.2"
+description = "Cloud and cloud shadow detection for Landsat 4-9 and Sentinel-2"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "click",
+    "gdal",
+    "geopandas",
+    "lightgbm",
+    "lxml",
+    "matplotlib",
+    "nbformat",
+    "numpy>=1.22",
+    "pandas",
+    "plotly",
+    "pyproj",
+    "rasterio",
+    "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "segmentation-models-pytorch",
+    "torch",
+    "utm",
+]
+
+[project.scripts]
+fmask = "fmask.cli.fmask:main"
+fmask-batch = "fmask.cli.fmask_batch:main"
+fmask-data = "fmask.cli.data:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fmask"]

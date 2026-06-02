@@ -1,0 +1,65 @@
+package:
+  name: fmask
+  version: 5.0.2
+
+source:
+  - path: ..
+
+build:
+  number: 0
+  noarch: python
+  script:
+    - ${{ PYTHON }} -m pip install --no-deps --no-build-isolation . -vv
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - hatchling
+  run:
+    - python >=3.10
+    - click
+    - gdal
+    - libgdal-jp2openjpeg
+    - geopandas
+    - lightgbm
+    - lxml
+    - matplotlib
+    - nbformat
+    - numpy
+    - pandas
+    - plotly
+    - pyproj
+    - pytorch
+    - rasterio
+    - scikit-image
+    - scikit-learn
+    - scipy
+    - segmentation-models-pytorch
+    - utm
+
+tests:
+  - python:
+      imports:
+        - fmask
+        - fmask.bitlib
+        - fmask.constant
+        - fmask.fmasklib
+        - fmask.phylib
+        - fmask.satellite
+        - fmask.utils
+      pip_check: false
+  - script:
+      - fmask --help
+      - fmask-batch --help
+      - fmask-data --help
+
+about:
+  homepage: https://github.com/gersl/fmask
+  license: MIT
+  license_file: LICENSE
+  summary: Cloud and cloud shadow detection for Landsat 4-9 and Sentinel-2
+  description: |
+    Fmask 5 is a Physics-Informed Machine Learning framework for automated
+    cloud and cloud shadow detection in Landsat 4-9 Collection 2 Level 1
+    and Sentinel-2 Level-1C imagery.

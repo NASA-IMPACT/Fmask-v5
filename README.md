@@ -29,6 +29,9 @@ Fmask Version 5.0 (Fmask 5) offers a Physics-Informed Machine Learning (PIML) fr
 
 ![Figure 2](https://github.com/qsly09/fmask5/blob/main/figure/figure_piml_flowchart.svg?raw=true)
 Figure 2: Flowchart of physics-informed machine learning (PIML) for cloud detection. The approach utilizes pixel-based LightGBM and CNN-based UNet models. The arrow indicates the processing sequence, transitioning from gray to black arrows. Abbreviations: HOT: Haze Optimized Transformation.
+
+
+
 # Complete Package
 **This repository only provides the source code and does *not* include the integrated global auxiliary datasets or pre-trained machine learning models.** To access the complete Fmask package (~3 GB), including all necessary auxiliary data and model files, please download it from the link(s) below:
 
@@ -38,44 +41,100 @@ Figure 2: Flowchart of physics-informed machine learning (PIML) for cloud detect
 | 5.0.1| [Link to Fmask 5.0.1 package](https://uconn-my.sharepoint.com/:u:/g/personal/shi_qiu_uconn_edu/IQC-46pkcOAjRYRsUWm2UeCzARR6eIQ1UsMG7r-UEfS_ucQ?e=OrIyad)|
 | 5.0.0| [Link to Fmask 5.0.0 package](https://uconn-my.sharepoint.com/:u:/g/personal/shi_qiu_uconn_edu/IQBPF0E7y9RzS5F9x4HULUYPAcDl5tTd0wkIVXn7X-jHoBU?e=2wUtzf)|
 
+
 # How to Use
 ## Installation
-### Create python environment with version 3.9 from (Mini) Conda
-- conda create -n fmask python=3.10
-### Activate the python environment
-- conda activate fmask
-### Configure dependent packages (The packages listed below were used for testing and may not all be required)
-- conda install rasterio gdal -y
-- pip install -U segmentation-models-pytorch
-- pip install plotly
-- pip install --upgrade nbformat  # for the plotly
-- pip install patchify
-- conda install lxml -y
-- pip install pandas
-- pip install geopandas
-- pip install -U scikit-learn
-- conda install scipy -y
-- conda install scikit-image -y
-- conda install matplotlib -y
-- pip install pyproj 
-- pip install utm
-- pip install lightgbm
-- pip install click
 
-## Running Fmask from the `main` Folder
+### Option 1 — pixi (recommended)
+
+[pixi](https://pixi.sh) manages all conda and PyPI dependencies in one step.
+
+```bash
+git clone https://github.com/gersl/fmask
+cd fmask
+pixi install
+```
+
+### Option 2 — uv / pip
+
+```bash
+pip install git+https://github.com/gersl/fmask
+```
+
+> **Note:** `gdal` can be difficult to install via pip on some platforms.
+> If installation fails, use the pixi method above or install GDAL system-wide first.
+
+### Option 3 — conda package via pixi workspace
+
+If your project uses [pixi](https://pixi.sh), you can reference this repository
+directly as a conda source dependency. pixi will build the package automatically
+from the included `recipe/recipe.yaml`:
+
+```toml
+# your-project/pixi.toml
+[dependencies]
+fmask = { path = "../fmask" }        # local clone
+# or from git source:
+# fmask = { git = "https://github.com/gersl/fmask" }
+```
+
+To build the conda package manually (e.g. for distribution or CI):
+
+```bash
+pixi build --path recipe/
+```
+
+This produces a `fmask-5.0.1-*.conda` artifact in the project root that can be
+used as a local channel or attached to a release.
+
+### Option 4 — complete ZIP (no git required)
+
+Download the complete package from the [Complete Package](#complete-package) section above.
+It includes all source code, models, and auxiliary data in one archive.
+
+```bash
+unzip fmask_5_0_1.zip
+cd fmask
+pixi install
+```
+
+### Ancillary data (Options 1, 2, and 3 only)
+
+The models and auxiliary rasters (~3 GB) are distributed separately via the
+[Complete Package](#complete-package) ZIP. After installing via git, run:
+
+```bash
+fmask-data install /path/to/fmask_5_0_1.zip
+```
+
+This extracts `data/` and `model/` into the `fmask` package directory by
+default, which is the expected location for a normal install.
+
+To install the ancillary data to a custom location (e.g. a shared filesystem),
+set the `FMASK_DATA` environment variable before running:
+
+```bash
+export FMASK_DATA=/shared/fmask_data
+fmask-data install /path/to/fmask_5_0_1.zip
+```
+
+Any subsequent `fmask` commands will pick up `FMASK_DATA` automatically.
+Run `fmask-data install --help` to see all options.
+
+## Running Fmask
 To apply Fmask-UPL on a single Landsat 8-9 image (recommended cloud dilation: 1 pixel):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_landsat8-9 --model UPL --dcloud=1
+fmask --imagepath /path/to/image_directory_landsat8-9 --model UPL --dcloud=1
 ```
 
 To apply Fmask-UPL on a single Sentinel-2 image (recommended cloud dilation: 0 pixels):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud=0
+fmask --imagepath /path/to/image_directory_Sentinel-2.SAFE --model UPL --dcloud 0
 ```
 
 To apply Fmask-LPL on a single Landsat 4-7 image (recommended cloud dilation: 1 pixel):
 ```bash
-python fmask.py --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
+fmask --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
 ```
 
 ## 🛠️ Command-Line Options
@@ -83,19 +142,16 @@ python fmask.py --imagepath /path/to/image_directory_landsat4-7 --model LPL --dc
 |--------------------|-------|-------------------------------------------------------------------------------------------------|---------|
 | `--imagepath`      | `-i`  | Path to input image directory (Landsat/Sentinel-2).                                             | *required* |
 | `--model`          | `-m`  | Cloud detection model to use (Options shown in [Table 1](#table1)).            | `UPL` |
-| `--dcloud`         | `-c`  | Additional dilation size (in pixels) for cloud mask.                                                       | `0`     |
-| `--dshadow`        | `-s`  | Additional dilation size (in pixels) for cloud shadow mask.                                                | `0`     |
-| `--dsnow`          | `-n`  | Additional dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
-| `--nthreads`       | `-nt`  | CPU threads for processing one image.                                                        | `1`     |
+| `--dcloud`         | `-c`  | Dilation size (in pixels) for cloud mask.                                                       | `3`     |
+| `--dshadow`        | `-s`  | Dilation size (in pixels) for cloud shadow mask.                                                | `5`     |
+| `--dsnow`          | `-n`  | Dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
+| `--nthreads`       | `-nt` | CPU threads for processing one image. `0` uses all available cores.                             | `1`     |
 | `--output`         | `-o`  | Directory for saving output. If not provided, results go into the input image directory.        | `None`  |
 | `--skip_existing`  | `-s`  | Skip processing if results already exist (`yes` or `no`).                                       | `no`    |
 | `--save_metadata`  | `-md` | Save model metadata as CSV.                                                                    | `no`    |
 | `--display_fmask`  | `-df` | Save and display the Fmask result as a PNG.                                                     | `no`   |
 | `--display_image`  | `-di` | Save and display the color composite figure (NGR: NIR-Green-Red and SNG: SWIR1-NIR-Red), cirrus band, and thermal band (if available).           | `no`   |
 | `--print_summary`  | `-ps` | Print cloud, shadow, snow, and clear percentage summary.                                        | `no`    |
-
-### Cloud Detection Models
-TBD
 
 ### Progress Information
 If the tool runs successfully, you will see progress information as shown below:
@@ -107,7 +163,7 @@ If the tool runs successfully, you will see progress information as shown below:
     >>> loading coastal in toa  
     >>> loading blue in toa 
 <details>
-<summary>Click to see the full information of the progress</summary>
+<summary>Click to see the full information on the progress</summary>
 
     ************************************************
     Starting Fmask 5.0.0 with dilating 3 for cloud, 5 for shadow, and 0 for snow  
@@ -180,7 +236,14 @@ Each pixel is classified with one of the following values:
 > **Note:** Water and snow/ice pixels are labeled solely to enhance cloud detection. Their detection accuracy has not been evaluated.
 
 ### Computing Efficiency
-TBD
+
+Use `--nthreads` to control CPU parallelism for a single image. The default (`1`) uses one core; `0` uses all available cores:
+
+```bash
+fmask --imagepath /path/to/image --model UPL --nthreads 4
+```
+
+When running on GPU (CUDA or Apple MPS), PyTorch inference is unaffected by this setting.
 
 ### Global Validation Dataset
 The global validation samples are available at [this link](https://uconn-my.sharepoint.com/:x:/g/personal/shi_qiu_uconn_edu/IQCOGXrB23p-SLBu0exv5WJBAS71rzu1JA8IsvZxC_tM7Gg?e=fVkXH6).
@@ -189,7 +252,7 @@ The global validation samples are available at [this link](https://uconn-my.shar
 #### 5.0.2
 - Added examination of physical rules in PIML.
 - Improved cloud postprocessing with object filtering.
-- Improved shadow matching with recalibrated parameters and spectral dilation [this page](https://github.com/qsly09/fmask5/wiki/Cloud-Shadow-Detection).
+- Improved shadow matching with recalibrated parameters and spectral dilation ([details](https://github.com/qsly09/fmask5/wiki/Cloud-Shadow-Detection)).
 
 #### 5.0.1
 - Added the Sen2Cloud+ dataset for machine learning training, reduced image chip size from 512×512 to 256×256 to support this dataset, and shifted chips to maximize valid-pixel coverage and mitigate UNet edge effects.
@@ -199,16 +262,16 @@ The global validation samples are available at [this link](https://uconn-my.shar
 - Adapted cloud shadow detection from MATLAB Fmask 4.6 with minor improvements described on [this page](https://github.com/qsly09/fmask5/wiki/Cloud-Shadow-Detection).
 
 #### 1 - 4.6
-Earlier versions of the Fmask tools offered only a physical-rule-based cloud detection module, programmed in MATLAB. See [this page](https://github.com/GERSL/Fmask) for more details.
+Earlier versions of the Fmask tools offered only a physical-rule-based cloud detection module, programmed in MATLAB. See [this page](https://github.com/GERSL/Fmask4) for more details.
 
 ## Contributing
 We welcome and encourage contributions to Fmask! There are two primary ways to contribute:
 
-## Report Issues or Suggestions
+### Report Issues or Suggestions
 If you happen to have any issues or suggestions for improving Fmask, we encourage you to open an issue or submit a pull request.
 
-## Share Problematic Images
-We are actively collecting examples of images that have not been processed accurately by the current version of Fmask. If you come across such images, please share the image ID with us via this Google Sheet. The collected images will be used to refine the inner machine learning models, improving their accuracy and reliability in future versions.
+### Share Problematic Images
+We are actively collecting examples of images that have not been processed accurately by the current version of Fmask. If you come across such images, please share the image ID with us on [this page](https://github.com/GERSL/Fmask/issues/1). The collected images will be used to refine the inner machine learning models, improving their accuracy and reliability in future versions.
 
 ## Known Issues
 - False positive errors in cloud detection over bright surfaces. Although the most recent version of Fmask has addressed most of these issues, challenges remain in highly reflective areas, such as high-mountain snow and ice.
@@ -217,7 +280,7 @@ We are actively collecting examples of images that have not been processed accur
 *Note*: Our team is collecting images with cloud detection issues and will continuously update the machine learning model to make improvements.
 
 ## References
-Qiu, S., Zhu, Z., Yang, X., Ju, J., Zhou, Q., Neigh, C., Physics-Informed Machine Learning for Cloud Detection in Landsat and Sentinel-2 Imagery, Under review
+Qiu, S., Zhu, Z., Yang, X., Ju, J., Zhou, Q., Neigh, C., Physics-Informed Machine Learning for Cloud Detection, Remote Sensing of Environment, In revision.
 
 Qiu, S., et al., Fmask 4.0: Improved cloud and cloud shadow detection in Landsats 4-8 and Sentinel-2 imagery, Remote Sensing of Environment, (2019), doi.org/10.1016/j.rse.2019.05.024 (paper for 4.0).
 

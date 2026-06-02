@@ -28,7 +28,8 @@ import pandas
 from skimage.measure import block_reduce, label, regionprops
 from skimage.feature import local_binary_pattern
 from skimage.morphology import binary_dilation, binary_erosion, reconstruction
-import constant as C
+from . import constant as C
+from ._paths import get_data_root as _get_data_root
 from scipy.ndimage import convolve
 
 # ignore the invalid errors
@@ -352,7 +353,7 @@ def gen_dem(profile, des=None, nthreads=1):
     """
     if C.MSG_FULL:
         print(">>> loading dem from gtopo30")
-    path_dem = os.path.join(Path(__file__).parent.parent, "data", "global_gt30.tif")
+    path_dem = os.path.join(_get_data_root(), "data", "global_gt30.tif")
     return warp2like(src=path_dem, like=profile, des=des, nthreads=nthreads)
 
 def gen_slope(profile, des=None, nthreads=1):
@@ -368,7 +369,7 @@ def gen_slope(profile, des=None, nthreads=1):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-slope")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_slope.tif"), like=profile, des=des, nthreads=nthreads)/100
+    return warp2like(src=os.path.join(_get_data_root(), "data", "global_gt30_slope.tif"), like=profile, des=des, nthreads=nthreads)/100
 
 def gen_aspect(profile, des=None, nthreads=1):
     """
@@ -382,7 +383,7 @@ def gen_aspect(profile, des=None, nthreads=1):
 
     if C.MSG_FULL:
         print(">>> loading gtopo30-aspect")
-    return warp2like(src=os.path.join(Path(__file__).parent.parent, "data", "global_gt30_aspect.tif"), like=profile, des=des, nthreads=nthreads)/100
+    return warp2like(src=os.path.join(_get_data_root(), "data", "global_gt30_aspect.tif"), like=profile, des=des, nthreads=nthreads)/100
     
 
 def gen_gswo(profile, des=None, nthreads=1):
@@ -408,7 +409,7 @@ def gen_gswo(profile, des=None, nthreads=1):
         print(">>> loading gswo")
     # Note: this function only works on the gobal layer in the package, which was produced by create_global_gswo150.py
     # check the image is within the global water layer, 78, -59
-    path_gswo = os.path.join(Path(__file__).parent.parent, "data", "global_gswo150.tif")
+    path_gswo = os.path.join(_get_data_root(), "data", "global_gswo150.tif")
     swo = warp2like(src=path_gswo, like=profile, des=des, nthreads=nthreads)
     if swo is not None:
         swo[swo == 255] = 100  # 255 is 100% ocean.
@@ -577,7 +578,7 @@ def imfill(data, obsmask, fill_value=None):
     # del obsmask_eroded
 
     # fill the data
-    # a “seed” image, which specifies the values that spread, and a "data" (or "mask") image, which gives the maximum allowed value at each pixel
+    # a "seed" image, which specifies the values that spread, and a "data" (or "mask") image, which gives the maximum allowed value at each pixel
     
     # Check the assertion
     # assert np.all(seed <= data), "Error: seed must be <= data for erosion."
@@ -1221,7 +1222,7 @@ def normalize_image(image, **kwargs):
     else:
         image_valid = image[obsmask]
     
-    # `np.percentile` changed in NumPy version 1.22.0: the "interpolation" argument is now called “method”.
+    # `np.percentile` changed in NumPy version 1.22.0: the “interpolation” argument is now called “method”.
     if np.__version__ >= '1.22.0':
         [min_val, max_val] = np.percentile(
             image_valid, percentile_range, method='linear')

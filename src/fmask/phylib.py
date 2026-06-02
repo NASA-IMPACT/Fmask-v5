@@ -4,9 +4,9 @@ import numpy as np
 import copy
 import pandas
 from concurrent.futures import ThreadPoolExecutor
-import constant as C
-from satellite import Data
-import utils
+from . import constant as C
+from .satellite import Data
+from . import utils
 from scipy.ndimage.filters import uniform_filter
 from sklearn.linear_model import LinearRegression
 from skimage.measure import label, regionprops
@@ -2806,4 +2806,3 @@ class Physical:
         self.overlap = overlap  # 0% overlap increasing compared to the previous test to alter the physical models
         # extremely cold cloud
         self.threshold_cold_cloud = 35  # in degree
-        self.nthreads = nthreads
