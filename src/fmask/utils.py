@@ -1222,7 +1222,7 @@ def normalize_image(image, **kwargs):
     else:
         image_valid = image[obsmask]
     
-    # `np.percentile` changed in NumPy version 1.22.0: the “interpolation” argument is now called “method”.
+    # `np.percentile` changed in NumPy version 1.22.0: the "interpolation" argument is now called "method".
     if np.__version__ >= '1.22.0':
         [min_val, max_val] = np.percentile(
             image_valid, percentile_range, method='linear')
