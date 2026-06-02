@@ -30,8 +30,6 @@ Fmask Version 5.0 (Fmask 5) offers a Physics-Informed Machine Learning (PIML) fr
 ![Figure 2](https://github.com/qsly09/fmask5/blob/main/figure/figure_piml_flowchart.svg?raw=true)
 Figure 2: Flowchart of physics-informed machine learning (PIML) for cloud detection. The approach utilizes pixel-based LightGBM and CNN-based UNet models. The arrow indicates the processing sequence, transitioning from gray to black arrows. Abbreviations: HOT: Haze Optimized Transformation.
 
-
-
 # Complete Package
 **This repository only provides the source code and does *not* include the integrated global auxiliary datasets or pre-trained machine learning models.** To access the complete Fmask package (~3 GB), including all necessary auxiliary data and model files, please download it from the link(s) below:
 
@@ -142,9 +140,9 @@ fmask --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
 |--------------------|-------|-------------------------------------------------------------------------------------------------|---------|
 | `--imagepath`      | `-i`  | Path to input image directory (Landsat/Sentinel-2).                                             | *required* |
 | `--model`          | `-m`  | Cloud detection model to use (Options shown in [Table 1](#table1)).            | `UPL` |
-| `--dcloud`         | `-c`  | Dilation size (in pixels) for cloud mask.                                                       | `3`     |
-| `--dshadow`        | `-s`  | Dilation size (in pixels) for cloud shadow mask.                                                | `5`     |
-| `--dsnow`          | `-n`  | Dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
+| `--dcloud`         | `-c`  | Additional dilation size (in pixels) for cloud mask.                                                       | `3`     |
+| `--dshadow`        | `-s`  | Additional dilation size (in pixels) for cloud shadow mask.                                                | `5`     |
+| `--dsnow`          | `-n`  | Additional dilation size (in pixels) for snow/ice mask.                                                    | `0`     |
 | `--nthreads`       | `-nt` | CPU threads for processing one image. `0` uses all available cores.                             | `1`     |
 | `--output`         | `-o`  | Directory for saving output. If not provided, results go into the input image directory.        | `None`  |
 | `--skip_existing`  | `-s`  | Skip processing if results already exist (`yes` or `no`).                                       | `no`    |
@@ -152,6 +150,9 @@ fmask --imagepath /path/to/image_directory_landsat4-7 --model LPL --dcloud=1
 | `--display_fmask`  | `-df` | Save and display the Fmask result as a PNG.                                                     | `no`   |
 | `--display_image`  | `-di` | Save and display the color composite figure (NGR: NIR-Green-Red and SNG: SWIR1-NIR-Red), cirrus band, and thermal band (if available).           | `no`   |
 | `--print_summary`  | `-ps` | Print cloud, shadow, snow, and clear percentage summary.                                        | `no`    |
+
+### Cloud Detection Models
+TBD
 
 ### Progress Information
 If the tool runs successfully, you will see progress information as shown below:
@@ -163,7 +164,7 @@ If the tool runs successfully, you will see progress information as shown below:
     >>> loading coastal in toa  
     >>> loading blue in toa 
 <details>
-<summary>Click to see the full information on the progress</summary>
+<summary>Click to see the full information of the progress</summary>
 
     ************************************************
     Starting Fmask 5.0.0 with dilating 3 for cloud, 5 for shadow, and 0 for snow  
@@ -252,7 +253,7 @@ The global validation samples are available at [this link](https://uconn-my.shar
 #### 5.0.2
 - Added examination of physical rules in PIML.
 - Improved cloud postprocessing with object filtering.
-- Improved shadow matching with recalibrated parameters and spectral dilation ([details](https://github.com/qsly09/fmask5/wiki/Cloud-Shadow-Detection)).
+- Improved shadow matching with recalibrated parameters and spectral dilation ([this page](https://github.com/qsly09/fmask5/wiki/Cloud-Shadow-Detection)).
 
 #### 5.0.1
 - Added the Sen2Cloud+ dataset for machine learning training, reduced image chip size from 512×512 to 256×256 to support this dataset, and shifted chips to maximize valid-pixel coverage and mitigate UNet edge effects.
@@ -280,7 +281,7 @@ We are actively collecting examples of images that have not been processed accur
 *Note*: Our team is collecting images with cloud detection issues and will continuously update the machine learning model to make improvements.
 
 ## References
-Qiu, S., Zhu, Z., Yang, X., Ju, J., Zhou, Q., Neigh, C., Physics-Informed Machine Learning for Cloud Detection, Remote Sensing of Environment, In revision.
+Qiu, S., Zhu, Z., Yang, X., Ju, J., Zhou, Q., Neigh, C., Physics-Informed Machine Learning for Cloud Detection in Landsat and Sentinel-2 Imagery, Under review
 
 Qiu, S., et al., Fmask 4.0: Improved cloud and cloud shadow detection in Landsats 4-8 and Sentinel-2 imagery, Remote Sensing of Environment, (2019), doi.org/10.1016/j.rse.2019.05.024 (paper for 4.0).
 
