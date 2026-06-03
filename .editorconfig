@@ -1,4 +1,0 @@
-root = true
-
-[*.py]
-end_of_line = lf

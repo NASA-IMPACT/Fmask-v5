@@ -2806,3 +2806,4 @@ class Physical:
         self.overlap = overlap  # 0% overlap increasing compared to the previous test to alter the physical models
         # extremely cold cloud
         self.threshold_cold_cloud = 35  # in degree
+        self.nthreads = nthreads

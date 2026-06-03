@@ -86,7 +86,7 @@ def fmask_display_image(fmask):
                             percentiles = [10, 90],
                             path = os.path.join(fmask.image.destination, fmask.image.name + '_Tirs1.png'))
 
-def fmask_physical(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="PHY", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_physical(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="PHY", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-physical model for masking clouds and cloud shadows.
     Parameters:
@@ -136,7 +136,7 @@ def fmask_physical(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = Non
     # msg
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_lightgbm(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="GBM", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_lightgbm(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="GBM", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-LightGBM model for masking clouds and cloud shadows.
     Parameters:
@@ -188,7 +188,7 @@ def fmask_lightgbm(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = Non
     # msg
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_unet(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="UNT", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_unet(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="UNT", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-UNet model for masking clouds and cloud shadows.
     Parameters:
@@ -233,7 +233,7 @@ def fmask_unet(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, s
 
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_lpl(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="LPL", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_lpl(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="LPL", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-LPL model for masking clouds and cloud shadows.
     Parameters:
@@ -279,7 +279,7 @@ def fmask_lpl(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, sk
 
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_upu(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="UPU", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_upu(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="UPU", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-UPU model for masking clouds and cloud shadows.
     Parameters:
@@ -323,7 +323,7 @@ def fmask_upu(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, sk
 
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_lpu(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="LPU", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_lpu(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="LPU", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-LPU model for masking clouds and cloud shadows.
     Parameters:
@@ -367,7 +367,7 @@ def fmask_lpu(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, sk
 
     print(f"Finished with {((time.perf_counter() - time_start)/60): 0.2f} mins")
 
-def fmask_upl(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, skip = True, endname="UPL", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
+def fmask_upl(path_image, dcloud=0, dshadow=0, dsnow = 0, destination = None, skip = True, endname="UPL", metadata = False, display_fmask = False, display_image = False, print_summary = False, nthreads = 0):
     """
     Fmask-UPL model for masking clouds and cloud shadows.
     Parameters:
@@ -415,7 +415,7 @@ def fmask_upl(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, sk
 @click.command()
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")
 @click.option("--dcloud", "-c", type=int, help="Dilation for cloud mask in pixels", default=1)
-@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=5)
+@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=0)
 @click.option("--dsnow", "-n", type=int, help="Dilation for snow mask in pixels", default=0)
 @click.option(
     "--imagepath", "-i",
@@ -433,7 +433,7 @@ def fmask_upl(path_image, dcloud=0, dshadow=5, dsnow = 0, destination = None, sk
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="no")
 @click.option("--display_fmask", "-df", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save the Fmask result as a PNG file.", default="no")
 @click.option("--display_image", "-di", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save color composite images as PNG files.", default="no")
-@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="no")
+@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="yes")
 @click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Default single core. Value 0 uses all available cores.", default=1)
 def main(model, dcloud, dshadow, dsnow, imagepath, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, nthreads) -> None:
     print("************************************************")

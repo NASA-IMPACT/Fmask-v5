@@ -13,12 +13,12 @@ Description:
 Batch processing of Landsat and Sentinel-2 images using Fmask 5. See details at fmask.py
 
 Usage examples:
-- python fmask.py --model=UPL --dcloud=3 --dshadow=5 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
+- python fmask.py --model=UPL --dcloud=1 --imagedir='/gpfs/sharedfs1/zhulab/Shi/ProjectCloudDetectionFmask5/HLSDataset'
 
 Command-line arguments:
 --model: the Fmask cloud detection model to use (PHY, GBM, UNT, LPL, UPU, LPU, UPL)
---dcloud: dilation for cloud mask in pixels; default is 3
---dshadow: dilation for shadow mask in pixels; default is 5
+--dcloud: dilation for cloud mask in pixels; default is 0
+--dshadow: dilation for shadow mask in pixels; default is 0
 --dsnow: dilation for snow mask in pixels; default is 0
 --output: destination directory for results; if not provided, results are saved in the image's directory
 --skip_existing: skip processing the image when its fmask layer exists; default is 'no'
@@ -28,7 +28,7 @@ Command-line arguments:
 --print_summary: print the summary of the Fmask result, including the percentage of cloud, shadow, snow, and clear; default is 'no'
 
 Changelog:
-- 5.0.1 (2025-10-23): 
+- 5.0.1 (2025-10-23):
     Algorithms described in detail by Qiu et al., 2026.
     Compared to 5.0.0, mainly added the Sen2Cloud+ dataset for ML training, and reduced image chip size from 512×512 to 256×256 to accommodate this dataset, and shifted image chips to maximize valid pixel coverage and mitigate edge effects in UNet models.
 
@@ -45,7 +45,7 @@ from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lp
 @click.command()
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")
 @click.option("--dcloud", "-c", type=int, help="Dilation for cloud mask in pixels", default=0)
-@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=5)
+@click.option("--dshadow", "-s", type=int, help="Dilation for shadow mask in pixels", default=0)
 @click.option("--dsnow", "-n", type=int, help="Dilation for snow mask in pixels", default=0)
 @click.option(
     "--imagedir", "-i",
@@ -63,10 +63,10 @@ from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lp
 @click.option("--save_metadata", "-md", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Save model metadata to a CSV file.", default="yes")
 @click.option("--display_fmask", "-df", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save the Fmask result as a PNG file.", default="yes")
 @click.option("--display_image", "-di", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Display and save color composite images as PNG files.", default="yes")
-@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="no")
-@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Value 0 uses all available cores.", default=0)
+@click.option("--print_summary", "-ps", type=click.Choice(["yes", "no", "Yes", "No", "YES", "NO"]), help="Print Fmask summary including cloud, shadow, snow, and clear percentages.", default="yes")
 @click.option("--ci", "-ci", type=int, help="The core's id", default=1)
 @click.option("--cn", "-cn", type=int, help="The number of cores", default=1)
+@click.option("--nthreads", "-nt", type=int, help="CPU threads for processing one image. Default single core. Value 0 uses all available cores.", default=0)
 def main(model, dcloud, dshadow, dsnow, imagedir, output, skip_existing, save_metadata, display_fmask, display_image, print_summary, ci, cn, nthreads) -> None:
 
     skip_existing = True if skip_existing.lower() == "yes" else False
