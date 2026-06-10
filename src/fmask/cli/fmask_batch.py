@@ -40,7 +40,7 @@ import os
 from pathlib import Path
 import click
 import glob
-from fmask.cli.fmask import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lpl,  fmask_lpu, fmask_upl, fmask_upu
+from fmask.cli.fmask_single import fmask_physical, fmask_lightgbm, fmask_unet, fmask_lpl,  fmask_lpu, fmask_upl, fmask_upu
 
 @click.command()
 @click.option("--model", "-m", type=str, help="Cloud detection model to use.", default="UPL")

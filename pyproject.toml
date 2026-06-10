@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fmask = "fmask.cli.fmask:main"
+fmask = "fmask.cli.fmask_single:main"
 fmask-batch = "fmask.cli.fmask_batch:main"
 fmask-data = "fmask.cli.data:main"
 
