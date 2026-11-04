@@ -191,3 +191,6 @@ model/
 *.conda
 *.tar.bz2
 output/
+
+# Distribution zip with ancillary data
+fmask_5_0_1.zip

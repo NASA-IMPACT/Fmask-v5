@@ -31,6 +31,13 @@ segmentation-models-pytorch = "*"
 [pypi-dependencies]
 fmask = { path = ".", editable = true }
 
+[feature.test.dependencies]
+pytest = "*"
+
+[environments]
+default = { solve-group = "default" }
+test = { features = ["test"], solve-group = "default" }
+
 [package]
 name = "fmask"
 
