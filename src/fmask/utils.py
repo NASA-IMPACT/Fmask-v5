@@ -26,12 +26,13 @@ from rasterio.enums import Resampling
 import pandas
 from skimage.measure import block_reduce, label, regionprops
 from skimage.feature import local_binary_pattern
-from skimage.morphology import binary_dilation, binary_erosion, reconstruction
+from skimage.morphology import binary_dilation, binary_erosion
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from . import constant as C
 from ._paths import get_data_root as _get_data_root
+from ._reconstruct import reconstruct_erosion
 from scipy.ndimage import convolve
 
 # ignore the invalid errors
@@ -539,9 +540,7 @@ def imfill(data, obsmask, fill_value=None):
     # Check the assertion
     # assert np.all(seed <= data), "Error: seed must be <= data for erosion."
     # seed = np.minimum(seed, data)
-    data_filled = reconstruction(
-        seed, data, method="erosion"
-    )  # a 3x3 square, of which return is float64
+    data_filled = reconstruct_erosion(seed, data)  # a 3x3 square
     # data_filled = data_filled.astype(
     #    np.float32
     # )  # covnert to the scalar that we want to use
