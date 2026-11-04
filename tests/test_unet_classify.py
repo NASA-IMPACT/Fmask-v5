@@ -6,7 +6,7 @@ import torch
 
 from fmask import utils
 from fmask.satellite import Data
-from fmask.unetlib import UNet
+from fmask.unetlib import UNet, fill_batch
 
 BANDS = ["blue", "green", "red", "nir", "swir1"]
 PREDICTORS = ["nir", "blue", "swir1"]
@@ -64,3 +64,47 @@ def test_classify_matches_per_pixel_scores(probability, normalize, batch_size):
         expected = probs.max(axis=0) if probability == "default" else probs[1]
         assert np.allclose(image_prob[mask], expected[mask], rtol=1e-5, atol=0)
     assert stub.image.data.data.tobytes() == cube_before.tobytes()
+
+
+def _datacube():
+    return torch.from_numpy(
+        np.random.default_rng(1).random((3, 70, 83)).astype(np.float32)
+    ).to("cpu", dtype=torch.float)
+
+
+def _stack(datacube, anchors, size):
+    return torch.stack([datacube[:, r:r + size, c:c + size] for r, c, _, _ in anchors])
+
+
+def _anchors(count):
+    return [(i * 2, i * 3, 0, 0) for i in range(count)]
+
+
+def test_fill_batch_matches_stack():
+    datacube = _datacube()
+    anchors = _anchors(4)
+    buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
+    actual = fill_batch(buffer, datacube, anchors, 32)
+    expected = _stack(datacube, anchors, 32)
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    assert actual.numpy().tobytes() == expected.numpy().tobytes()
+
+
+def test_short_last_batch():
+    datacube = _datacube()
+    buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
+    fill_batch(buffer, datacube, _anchors(4), 32)
+    anchors = _anchors(2)
+    actual = fill_batch(buffer, datacube, anchors, 32)
+    expected = _stack(datacube, anchors, 32)
+    assert actual.shape == (2, 3, 32, 32)
+    assert actual.numpy().tobytes() == expected.numpy().tobytes()
+
+
+def test_fill_batch_does_not_change_datacube():
+    datacube = _datacube()
+    before = datacube.clone()
+    buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
+    fill_batch(buffer, datacube, _anchors(4), 32)
+    assert torch.equal(datacube, before)

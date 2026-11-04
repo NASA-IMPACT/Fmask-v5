@@ -159,6 +159,23 @@ class Dataset(BaseDataset):
         return len(self.ids)
 
 
+def fill_batch(buffer, datacube, anchors, patch_size):
+    """Copy the datacube patches at the anchors into a buffer and return the filled part.
+
+    Args:
+        buffer (tensor): Reused tensor of (batch, channel, height, width), with room for all anchors.
+        datacube (tensor): The datacube of (channel, height, width).
+        anchors (list): The (row, column, _, _) of each patch.
+        patch_size (int): The height and width of a patch.
+
+    Returns:
+        tensor: The part of the buffer holding this batch.
+    """
+    for index, (row, col, _, _) in enumerate(anchors):
+        buffer[index] = datacube[:, row:row + patch_size, col:col + patch_size]
+    return buffer[: len(anchors)]
+
+
 class UNet(object):
     """_summary_"""
 
@@ -580,15 +597,19 @@ class UNet(object):
             image_prob = np.zeros((h, w), dtype=np.float32)
             image_prob_full = np.zeros((h, w), dtype=np.float32)
         self.model.eval()
-        
+
+        batch_buffer = torch.empty(
+            (min(self.batch_size, len(offanchors)), datacube.shape[0], self.patch_size, self.patch_size),
+            dtype=datacube.dtype,
+            device=datacube.device,
+        )
         for ibatch in range(0, len(offanchors), self.batch_size):
             # obtain the batch anchors
             batch_anchors = offanchors[ibatch : np.min((ibatch + self.batch_size, len(offanchors)))]  # maximum batch size
-            # obtain the batch tensor of the datacube
-            # batch_tensor = torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])
             # make the classification
-            with torch.no_grad(): # one line to finish the classification, in order to save the memory
-                batch_probs = torch.nn.functional.softmax(self.model(torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])), dim=1)
+            batch_tensor = fill_batch(batch_buffer, datacube, batch_anchors, self.patch_size)
+            with torch.inference_mode(): # one line to finish the classification, in order to save the memory
+                batch_probs = torch.nn.functional.softmax(self.model(batch_tensor), dim=1)
             # batch processing the class and prob layer
             if prob_index == -2: # -2 means the top class will be extracted by this model, but not the probability
                 _, batch_classes = batch_probs.topk(1, dim=1)  # top label with top prob.
