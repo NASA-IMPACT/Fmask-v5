@@ -117,6 +117,22 @@ class Data:
             else:
                 return None
 
+    def sample(self, bands, rows, cols):
+        """
+        Returns the values of the specified bands at the given pixels, without copying whole bands.
+
+        Args:
+            bands (list): The names of the bands, in output order.
+            rows (ndarray): The row of each pixel.
+            cols (ndarray): The column of each pixel.
+
+        Returns:
+            ndarray: A new array of shape (len(bands), len(rows)).
+
+        """
+        indices = np.array([self.bands.index(band) for band in bands])
+        return self.data[indices[:, None], rows, cols]
+
     def __init__(self, data, bands):
         """
         Initializes a new instance of the Data class.
