@@ -35,6 +35,8 @@ from ._paths import get_data_root as _get_data_root
 from ._reconstruct import reconstruct_erosion
 from scipy.ndimage import convolve
 
+NORMALIZE_BLOCK_ROWS = 1024
+
 # ignore the invalid errors
 np.seterr(invalid='ignore') 
 
@@ -1185,6 +1187,43 @@ def normalize_image(image, **kwargs):
     image_scaled[np.where(image_scaled > normal_scale_range[1])] = normal_scale_range[1]
     return image_scaled
 
+def normalize_bands(
+    cube, indices, obsmask=None, percentiles=(1, 99), srange=(-1, 1), block_rows=NORMALIZE_BLOCK_ROWS
+):
+    """
+    Normalize selected bands of a datacube into a new array, a block of rows at a time.
+
+    Args:
+        cube (ndarray): The input datacube (band, row, column), which is not changed.
+        indices (list): The bands to normalize, in output order.
+        obsmask (ndarray, optional): The observation mask. Pixels out of the mask get min(srange).
+        percentiles (sequence, optional): The percentiles used for rescaling.
+        srange (sequence, optional): The scale range used for rescaling.
+        block_rows (int, optional): The number of rows scaled in float64 at once.
+
+    Returns:
+        ndarray: The normalized bands, with the dtype of the input.
+    """
+    rows = cube.shape[1]
+    normalized = np.empty((len(indices), *cube.shape[1:]), dtype=cube.dtype)
+    for output_index, band_index in enumerate(indices):
+        band = cube[band_index]
+        valid = band.astype("float") if obsmask is None else band[obsmask].astype("float")
+        min_val, max_val = np.percentile(valid, percentiles, method="linear", overwrite_input=True)
+        del valid
+        for start in range(0, rows, block_rows):
+            stop = start + block_rows
+            # float64 scalars keep this arithmetic in float64 before the cast on assignment.
+            scaled = ((band[start:stop] - min_val) / (max_val - min_val + C.EPS)) * (
+                srange[1] - srange[0]
+            ) + srange[0]
+            scaled[scaled < srange[0]] = srange[0]
+            scaled[scaled > srange[1]] = srange[1]
+            if obsmask is not None:
+                scaled[~obsmask[start:stop]] = min(srange)
+            normalized[output_index, start:stop] = scaled
+    return normalized
+
 def normalize_datacube(datacube, **kwargs):
     """
     Normalize a datacube by rescaling each layer.
@@ -1203,16 +1242,11 @@ def normalize_datacube(datacube, **kwargs):
     percentiles = kwargs.get("percentiles", [1, 99])
     srange = kwargs.get("srange", [-1, 1])
     obsmask = kwargs.get("obsmask", None)
-    _datacube = datacube.copy() # not to alter the orginal values
     if C.MSG_FULL:
         print(f">>> normalizing the datacube to {srange} with percentiles {percentiles}")
-    # rescale the data cube
-    for i in range(0, _datacube.shape[0]):
-        datalayer = normalize_image(_datacube[i, :, :], obsmask=obsmask, percentiles=percentiles, srange=srange)
-        if obsmask is not None:
-            datalayer[~obsmask] = min(srange) # give min value to the pixels out of the mask, as background
-        _datacube[i, :, :] = datalayer
-    return _datacube
+    return normalize_bands(
+        datacube, list(range(datacube.shape[0])), obsmask=obsmask, percentiles=percentiles, srange=srange
+    )
 
 def select_cloud_seed(
     cloud_mask, cloud_prob, label_cloud, label_noncloud, label_filled, seed_level_cloud, seed_level_noncloud

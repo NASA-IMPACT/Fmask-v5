@@ -12,7 +12,7 @@ from torch import from_numpy
 from torch.utils.data import DataLoader, Dataset as BaseDataset
 import segmentation_models_pytorch as smp
 from pathlib import Path
-from .utils import normalize_datacube, init_patch_offanchors
+from .utils import normalize_bands, normalize_datacube, init_patch_offanchors
 import time
 from . import constant as C
 np.seterr(invalid='ignore') # ignore the invalid errors
@@ -547,9 +547,14 @@ class UNet(object):
         )
 
         # rescale the date cube
-        datacube = self.image.data.get(self.predictors)
         if normalize:
-            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask)
+            datacube = normalize_bands(
+                self.image.data.data,
+                [self.image.data.bands.index(predictor) for predictor in self.predictors],
+                obsmask=self.image.obsmask,
+            )
+        else:
+            datacube = self.image.data.get(self.predictors)
     
         if C.MSG_FULL:
             print(">>> classifying image by unet")
