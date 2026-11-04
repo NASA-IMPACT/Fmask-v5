@@ -16,7 +16,7 @@ SHAPE = (70, 83)
 
 def _stub(batch_size=3):
     torch.manual_seed(0)
-    cube = (np.random.default_rng(0).random((len(BANDS), *SHAPE)) * 3000).astype(np.float32)
+    cube = (np.random.default_rng(0).random((len(BANDS), *SHAPE)) * 3).astype(np.float32)
     obsmask = np.ones(SHAPE, dtype=bool)
     obsmask[:6] = False
     obsmask[:, -5:] = False
