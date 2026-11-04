@@ -57,6 +57,22 @@ from . import constant as C
 
 READ_THREADS = 4
 
+SENTINEL2_SPECTRAL_READS = (
+    ("coastal", False),
+    ("blue", True),
+    ("green", True),
+    ("red", True),
+    ("vre1", False),
+    ("vre2", False),
+    ("vre3", False),
+    ("wnir", False),
+    ("nir", False),
+    ("wv", False),
+    ("swir1", False),
+    ("swir2", False),
+    ("cirrus", False),
+)
+
 LANDSAT_SPECTRAL_READS = (
     ("coastal", "TOA", False),
     ("blue", "TOA", True),
@@ -957,15 +973,40 @@ class Sentinel2(Satellite):
 
         if C.MSG_FULL:
             print(f">>> loading {band.lower()} in {level.lower()}")
+        image, satu, valid = self._read_band_values(band, level, saturation)
+        if maskupdate:
+            self._update_obsmask(valid)
+        # append the profile of the geotiff, which will be used as the reference to auxiliary data warping and mask saving.
+        if profile:
+            with rasterio.open(self._band_path(band.upper())) as src:
+                self.profile = src.meta.copy()
+                self.profilefull = src  # save the full profile for the further use
+        return image, satu
+
+    def _band_path(self, band):
+        """Return the path of the band named in uppercase."""
+        band_file = self.bands[self.bands["NAME"] == band]["FILE"].values[0]
+        return os.path.join(self.folder, band_file) + ".jp2"
+
+    def _read_band_values(self, band, level="TOA", saturation=False):
+        """Read and convert a band without changing this object, so it can run in a thread.
+
+        Args:
+            band (str): The name of the band to read.
+            level (str, optional): The level of the image data. Defaults to "TOA".
+            saturation (bool, optional): Return the saturated layer of this band. Defaults to False.
+
+        Returns:
+            tuple: image of the band, saturated pixels or None, and valid pixels before conversion
+        """
         # The No Data value is represented as 0 in the L1C product. see https://sentinels.copernicus.eu/web/sentinel/technical-guides/sentinel-2-msi/level-1c/product-formatting
         src_nodata = self.nodata_index
         # specify the band information
         band = band.upper()  # uppercase
-        band_file = self.bands[self.bands["NAME"] == band]["FILE"].values[0]
         res_trgt = self.profilefull.res[
             0
         ]  # resolution of processing images, such as 20 m
-        with rasterio.open(os.path.join(self.folder, band_file) + ".jp2") as src:
+        with rasterio.open(self._band_path(band)) as src:
             res_band = src.res[0]
             if res_trgt == res_band:  # band's resolution == our target
                 image = src.read(1)  # only one band, and orginal band
@@ -977,28 +1018,13 @@ class Sentinel2(Satellite):
                 image = src.read(
                     1, out_shape=self.profilefull.shape, resampling=Resampling.nearest
                 )  # only one band, and nearest is used to resample to smaller resolution
+        valid = image != src_nodata  # should be 0 when we test the Landsat Collection 2.
         satu = image == self.saturation_index if saturation else None
-        if maskupdate:
-            # self.obsmask = np.logical_and(self.obsmask, image != src.nodata) # should be 0 when we test the Landsat Collection 2.
-            if self.obsmask is None:  # initlize the mask of observation extent
-                self.obsmask = (
-                    image != src_nodata
-                )  # should be 0 when we test the Landsat Collection 2.
-            else:  # update by overlapping it with new band's extent
-                self.obsmask = np.logical_and(
-                    self.obsmask, image != src_nodata
-                )  # should be 0 when we test the Landsat Collection 2.
-
-        # append the profile of the geotiff, which will be used as the reference to auxiliary data warping and mask saving.
-        if profile:
-            self.profile = src.meta.copy()
-            self.profilefull = src  # save the full profile for the further use
 
         # return final result
         if level == "TOA":
-            return self.convert_dn_to_toa(band, image), satu
-        else:
-            return image, satu
+            return self.convert_dn_to_toa(band, image), satu, valid
+        return image, satu, valid
 
     def convert_dn_to_toa(self, band, data):
         """
@@ -1141,72 +1167,20 @@ class Sentinel2(Satellite):
             dtype=np.float32,
         )
         # Spectral bands
-        predictor = "coastal"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "blue"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], satu_blue = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
-            )
-        predictor = "green"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], satu_green = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
-            )
-        predictor = "red"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], satu_red = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
-            )
-        predictor = "vre1"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "vre2"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "vre3"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-
-        predictor = "wnir"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "nir"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "wv"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "swir1"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "swir2"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
-        predictor = "cirrus"
-        if predictor in predictors:
-            bands[predictors.index(predictor), :, :], _ = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
-            )
+        requests = [
+            {"band": band, "level": "TOA", "saturation": saturation}
+            for band, saturation in SENTINEL2_SPECTRAL_READS
+            if band in predictors
+        ]
+        # saturation for visible bands after the calculation of whiteness
+        statu = BitLayer(bands.shape[1:])
+        for request, (image, satu, valid) in zip(requests, self._read_bands(requests)):
+            if maskupdate:
+                self._update_obsmask(valid)
+            bands[predictors.index(request["band"]), :, :] = image
+            if satu is not None:
+                statu.append(satu) # set bits 0, 1 and 2 for blue, green and red, in request order
+        del image, satu, valid
 
         # spectral index
         predictor = "hot"
@@ -1217,13 +1191,6 @@ class Sentinel2(Satellite):
                 bands[predictors.index("blue"), :, :],
                 bands[predictors.index("red"), :, :],
             )
-
-        # saturation for visible bands after the calculation of whiteness
-        statu = BitLayer(bands.shape[1:])
-        statu.append(satu_blue)
-        statu.append(satu_green)
-        statu.append(satu_red)
-        del satu_blue, satu_green, satu_red
 
         predictor = "whiteness"
         if predictor in predictors:
