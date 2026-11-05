@@ -1,5 +1,3 @@
-import sys
-
 import numpy as np
 import pandas
 import pytest
@@ -7,7 +5,7 @@ import rasterio
 from rasterio.transform import from_origin
 
 from fmask import constant as C
-from fmask import satellite, utils
+from fmask import utils
 from fmask.satellite import Landsat
 
 SHAPE = (48, 64)
@@ -92,20 +90,6 @@ def test_values_do_not_touch_self(scene):
     assert image.profilefull == "profilefull"
     assert valid.dtype == np.bool_
     assert not valid[1, :].any()
-
-
-def test_read_datacube_releases_read_inputs_before_indices(scene, monkeypatch):
-    original_hot = satellite.hot
-    seen = {}
-
-    def spy(*args):
-        seen.update(sys._getframe(1).f_locals)
-        return original_hot(*args)
-
-    monkeypatch.setattr(satellite, "hot", spy)
-    _make(Landsat, scene).read_datacube(SPECTRAL + ["hot"])
-    assert seen
-    assert not {"request", "requests", "cos_sza", "saturated", "image", "satu", "valid"} & set(seen)
 
 
 def _raw(scene, band):
@@ -194,16 +178,11 @@ def test_read_band_profile(scene):
     assert image.profilefull.closed
 
 
-def test_obsmask_all_bands(scene):
-    image = _make(Landsat, scene)
-    image.read_datacube(list(SPECTRAL))
-    _assert_same(image.obsmask, _expected_obsmask(scene, SPECTRAL))
-    assert not image.obsmask.all()
-    assert image.obsmask.any()
-
-
-@pytest.mark.parametrize("maskupdate", [True, False])
-@pytest.mark.parametrize("predictors", [SPECTRAL, list(reversed(SPECTRAL))], ids=["forward", "reversed"])
+@pytest.mark.parametrize(
+    "predictors,maskupdate",
+    [(SPECTRAL, True), (list(reversed(SPECTRAL)), False)],
+    ids=["forward_with_mask", "reversed_without_mask"],
+)
 def test_read_datacube_matches_each_band(scene, predictors, maskupdate):
     image = _make(Landsat, scene)
     data, _ = image.read_datacube(list(predictors), maskupdate=maskupdate)

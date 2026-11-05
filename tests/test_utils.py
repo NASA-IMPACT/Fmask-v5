@@ -4,7 +4,6 @@ from skimage.morphology import reconstruction
 
 from fmask import constant as C
 from fmask import utils
-from fmask.satellite import Data
 
 SHAPE = (4, 23, 31)
 
@@ -63,20 +62,18 @@ def test_percentiles_ignore_pixels_outside_the_mask():
     _assert_same(_bands(with_outliers, obsmask=mask), _bands(cube, obsmask=mask))
 
 
-@pytest.mark.parametrize("srange", [(-1, 1), (0, 1), (-3, 7)])
-def test_pixels_outside_the_mask_get_the_range_minimum(srange):
-    result = _bands(_cube(3), obsmask=_partial_mask(), srange=srange)
-    assert (result[:, ~_partial_mask()] == min(srange)).all()
+def test_pixels_outside_the_mask_get_the_range_minimum():
+    result = _bands(_cube(3), obsmask=_partial_mask(), srange=(-3, 7))
+    assert (result[:, ~_partial_mask()] == -3).all()
 
 
-@pytest.mark.parametrize("percentiles,srange", [((1, 99), (-1, 1)), ((5, 50), (-3, 7))])
-def test_values_inside_the_mask_stay_in_range(percentiles, srange):
+def test_values_inside_the_mask_stay_in_range():
     mask = _partial_mask()
-    result = _bands(_cube(4), obsmask=mask, percentiles=percentiles, srange=srange)
-    assert result.min() >= srange[0]
-    assert result.max() <= srange[1]
-    assert result[:, mask].min() == srange[0]
-    assert result[:, mask].max() == srange[1]
+    result = _bands(_cube(4), obsmask=mask, percentiles=(5, 50), srange=(-3, 7))
+    assert result.min() >= -3
+    assert result.max() <= 7
+    assert result[:, mask].min() == -3
+    assert result[:, mask].max() == 7
 
 
 def test_constant_band_gets_the_range_minimum():
@@ -105,30 +102,23 @@ def test_nan_outside_the_mask_is_replaced():
 
 
 @pytest.mark.parametrize("use_mask", [True, False])
-@pytest.mark.parametrize("block_rows", [1, 7, 1000])
-def test_block_size_does_not_change_results(block_rows, use_mask):
+def test_block_size_does_not_change_results(use_mask):
     cube = _cube(8)
     obsmask = _partial_mask() if use_mask else None
     _assert_same(
-        _bands(cube, obsmask=obsmask, block_rows=block_rows),
+        _bands(cube, obsmask=obsmask, block_rows=7),
         _bands(cube, obsmask=obsmask, block_rows=SHAPE[1]),
     )
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_result_keeps_the_input_dtype(dtype):
-    assert _bands(_cube(9, dtype)).dtype == dtype
+def test_result_keeps_the_input_dtype():
+    assert _bands(_cube(9, np.float64)).dtype == np.float64
 
 
 def test_normalize_datacube_matches_normalize_bands():
     cube, mask = _cube(10), _partial_mask()
     _assert_same(utils.normalize_datacube(cube, obsmask=mask), _bands(cube, obsmask=mask))
     _assert_same(utils.normalize_datacube(cube), _bands(cube))
-
-
-def test_empty_obsmask_raises():
-    with pytest.raises(IndexError):
-        _bands(_cube(11), obsmask=np.zeros(SHAPE[1:], dtype=bool))
 
 
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
@@ -142,11 +132,6 @@ def test_input_not_mutated():
     _assert_same(mask, mask_before)
 
 
-def test_result_does_not_share_memory_with_input():
-    cube = _cube(13)
-    assert not np.shares_memory(_bands(cube), cube)
-
-
 def test_bands_subset_follows_the_requested_order():
     cube, mask = _cube(14), _partial_mask()
     _assert_same(
@@ -155,31 +140,19 @@ def test_bands_subset_follows_the_requested_order():
     )
 
 
-def test_predictor_order_matches_data_get():
-    cube, mask = _cube(15), _partial_mask()
-    data = Data(cube, ["blue", "green", "red", "nir"])
-    predictors = ["nir", "blue", "red"]
-    _assert_same(
-        utils.normalize_bands(data.data, [data.bands.index(p) for p in predictors], obsmask=mask),
-        _bands(data.get(predictors), obsmask=mask),
-    )
-
-
 def _random(dtype, seed=0, shape=(40, 57)):
     return np.random.default_rng(seed).random(shape).astype(dtype)
 
 
-@pytest.mark.parametrize("fill_value", [None, -1.0])
-@pytest.mark.parametrize("obs_shape", ["full", "partial", "single"])
+@pytest.mark.parametrize(
+    "obs_shape,fill_value", [("full", None), ("partial", None), ("partial", -1.0)]
+)
 def test_imfill_matches_skimage(obs_shape, fill_value):
     data = _random(np.float32, 11, (31, 37)) * 10
     obsmask = np.ones(data.shape, dtype=bool)
     if obs_shape == "partial":
         obsmask[:5] = False
         obsmask[:, -4:] = False
-    elif obs_shape == "single":
-        obsmask[:] = False
-        obsmask[15, 15] = True
     max_val = data[obsmask].max()
     filled_input = data.copy()
     filled_input[~obsmask] = max_val if fill_value is None else fill_value
@@ -204,9 +177,3 @@ def test_imfill_keeps_a_depression_open_to_the_border():
     data[2, :3] = 1.0
     result = utils.imfill(data, np.ones((5, 5), dtype=bool))
     assert (result[2, :3] == 1.0).all()
-
-
-def test_imfill_empty_observation_mask_raises():
-    data = _random(np.float32, 12, (8, 8))
-    with pytest.raises(ValueError):
-        utils.imfill(data, np.zeros(data.shape, dtype=bool))

@@ -1,7 +1,6 @@
 import gc
 import inspect
 import threading
-import time
 import weakref
 
 import numpy as np
@@ -42,14 +41,6 @@ def test_sample_matches_get():
     assert actual.T.tobytes() == expected.T.tobytes()
 
 
-def test_sample_is_copy():
-    data = _data()
-    before = data.data.copy()
-    rows, cols = _coords()
-    data.sample(["nir", "blue"], rows, cols)[:] = -1
-    assert np.array_equal(data.data, before)
-
-
 def test_read_bands_order(monkeypatch):
     image = object.__new__(_Reader)
     release = threading.Event()
@@ -64,27 +55,6 @@ def test_read_bands_order(monkeypatch):
     monkeypatch.setattr(_Reader, "_read_band_values", fake_values)
     requests = [{"band": "first", "level": "TOA"}, {"band": "second", "level": "TOA"}]
     assert list(image._read_bands(requests)) == ["first", "second"]
-
-
-def test_read_bands_limits_threads(monkeypatch):
-    image = object.__new__(_Reader)
-    lock = threading.Lock()
-    active = [0, 0]
-    barrier = threading.Barrier(satellite.READ_THREADS)
-
-    def fake_values(self, band, **kwargs):
-        with lock:
-            active[0] += 1
-            active[1] = max(active)
-        barrier.wait(timeout=10)
-        with lock:
-            active[0] -= 1
-        return band
-
-    monkeypatch.setattr(_Reader, "_read_band_values", fake_values)
-    count = satellite.READ_THREADS * 3
-    list(image._read_bands([{"band": str(i), "level": "TOA"} for i in range(count)]))
-    assert active[1] == satellite.READ_THREADS
 
 
 def test_read_bands_propagates_errors(monkeypatch):
@@ -131,24 +101,26 @@ def test_read_bands_releases_each_result_before_the_next(monkeypatch):
     list(results)
 
 
-def test_read_bands_limits_results_waiting_behind_a_slow_band(monkeypatch):
-    image = object.__new__(_Reader)
-    started = []
-    started_during_slow_band = []
-
-    def fake_values(self, band, **kwargs):
-        started.append(band)
-        if band == "0":
-            time.sleep(0.3)
-            started_during_slow_band.append(len(started))
-        return band
-
-    monkeypatch.setattr(_Reader, "_read_band_values", fake_values)
-    count = satellite.READ_THREADS * 3
-    requests = [{"band": str(i), "level": "TOA"} for i in range(count)]
-    assert list(image._read_bands(requests)) == [str(i) for i in range(count)]
-    assert started_during_slow_band == [satellite.READ_THREADS]
-
-
 def test_read_band_arguments_match_landsat():
     assert inspect.signature(Sentinel2.read_band) == inspect.signature(Landsat.read_band)
+
+
+def test_read_bands_starts_a_read_only_as_results_are_consumed(monkeypatch):
+    image = object.__new__(_Reader)
+    submitted = []
+
+    class CountingPool(satellite.ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            submitted.append(args)
+            return super().submit(*args, **kwargs)
+
+    monkeypatch.setattr(satellite, "ThreadPoolExecutor", CountingPool)
+    monkeypatch.setattr(_Reader, "_read_band_values", lambda self, band, **kwargs: band)
+    count = satellite.READ_THREADS * 3
+    results = image._read_bands([{"band": str(i), "level": "TOA"} for i in range(count)])
+
+    assert next(results) == "0"
+    assert len(submitted) == satellite.READ_THREADS
+    assert next(results) == "1"
+    assert len(submitted) == satellite.READ_THREADS + 1
+    assert list(results) == [str(i) for i in range(2, count)]

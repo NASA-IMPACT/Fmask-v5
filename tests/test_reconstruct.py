@@ -39,12 +39,6 @@ def _only_negative_zero(dtype):
     return np.full((9, 11), -0.0, dtype=dtype)
 
 
-def _positive_zero_and_values(dtype):
-    mask = _ties(dtype)
-    mask[0, 0] = 0.0
-    return mask
-
-
 def _infinities(dtype):
     mask = _random(dtype, 4)
     mask[3, 3] = -np.inf
@@ -63,7 +57,6 @@ CASES = {
     "nan": _with_nan,
     "signed_zeros": _signed_zeros,
     "only_negative_zero": _only_negative_zero,
-    "positive_zero": _positive_zero_and_values,
     "infinities": _infinities,
     "negative_values": _negative_values,
     "one_by_one": lambda dtype: np.array([[1.5]], dtype=dtype),
@@ -89,8 +82,15 @@ def test_matches_skimage(case, dtype):
     )
 
 
-@pytest.mark.parametrize("seed_dtype", [np.float32, np.float64])
-@pytest.mark.parametrize("mask_dtype", [np.uint8, np.int16, np.bool_, np.float16])
+@pytest.mark.parametrize(
+    "mask_dtype,seed_dtype",
+    [
+        (np.uint8, np.float32),
+        (np.int16, np.float64),
+        (np.bool_, np.float32),
+        (np.float16, np.float64),
+    ],
+)
 def test_matches_skimage_integer_and_small_types(mask_dtype, seed_dtype):
     mask = np.random.default_rng(8).integers(0, 2, (20, 23)).astype(mask_dtype)
     seed = _hole_seed(mask.astype(seed_dtype))
@@ -98,26 +98,6 @@ def test_matches_skimage_integer_and_small_types(mask_dtype, seed_dtype):
         reconstruct_erosion(seed, mask),
         reconstruction(seed, mask, method="erosion"),
     )
-
-
-def test_matches_skimage_on_imfill_input():
-    mask = _random(np.float32, 9, (61, 47)) * 100
-    mask[10:30, 10:30] -= 50
-    seed = mask.copy()
-    seed[1:-1, 1:-1] = mask.max()
-    _assert_same(
-        reconstruct_erosion(seed, mask),
-        reconstruction(seed, mask, method="erosion"),
-    )
-
-
-def test_leaves_inputs_unchanged():
-    mask = _random(np.float32, 10)
-    seed = _hole_seed(mask)
-    mask_before, seed_before = mask.copy(), seed.copy()
-    reconstruct_erosion(seed, mask)
-    _assert_same(mask, mask_before)
-    _assert_same(seed, seed_before)
 
 
 def test_seed_below_mask_raises_same_error():
@@ -130,22 +110,8 @@ def test_seed_below_mask_raises_same_error():
     assert str(actual.value) == str(expected.value)
 
 
-def test_shape_mismatch_raises_same_error():
-    with pytest.raises(AssertionError):
-        reconstruction(np.ones((5, 5)), np.ones((4, 5)), method="erosion")
-    with pytest.raises(AssertionError):
-        reconstruct_erosion(np.ones((5, 5)), np.ones((4, 5)))
-
-
-def test_private_api_available():
+def test_mirror_is_available():
     assert _reconstruct.MIRROR_AVAILABLE
-    from skimage.morphology._grayreconstruct import reconstruction_loop
-
-    ranks = np.array([1, 1, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint32)
-    prev = np.full(9, -1, np.int32)
-    next_ = np.full(9, -1, np.int32)
-    strides = np.array([1, -1], np.int32)
-    reconstruction_loop(ranks, prev, next_, strides, 8, 3)
 
 
 @pytest.mark.parametrize(

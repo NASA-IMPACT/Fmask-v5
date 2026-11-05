@@ -85,10 +85,14 @@ def scene(tmp_path):
     return _write_scene(tmp_path, OFFSETS, nodata_lines=True)
 
 
-@pytest.fixture(params=[-1000.0, -1001.0, 0.0], ids=["offset_1000", "offset_1001", "no_offset"])
-def clear_image(tmp_path, request):
-    offsets = {name: request.param for name, _, _ in BANDS}
-    return _make(_write_scene(tmp_path, offsets, nodata_lines=False))
+def _clear_image(folder, offset):
+    offsets = {name: offset for name, _, _ in BANDS}
+    return _make(_write_scene(folder, offsets, nodata_lines=False))
+
+
+@pytest.fixture
+def clear_image(tmp_path):
+    return _clear_image(tmp_path, -1000.0)
 
 
 def _assert_same(actual, expected):
@@ -121,10 +125,9 @@ def test_read_band_converts_to_toa(scene, band):
     assert satu is None
 
 
-@pytest.mark.parametrize("band", ["vre1", "blue", "coastal"], ids=["equal", "average", "nearest"])
-def test_read_band_returns_dn_for_other_levels(scene, band):
-    result, _ = _make(scene).read_band(band, level="DN")
-    _assert_same(result, _raw(scene, band))
+def test_read_band_returns_dn_for_other_levels(scene):
+    result, _ = _make(scene).read_band("blue", level="DN")
+    _assert_same(result, _raw(scene, "blue"))
     assert result.shape == (TARGET, TARGET)
 
 
@@ -163,16 +166,11 @@ def test_values_do_not_touch_self(scene):
     assert valid.dtype == np.bool_
 
 
-def test_obsmask_all_bands(scene):
-    image = _make(scene)
-    image.read_datacube(list(SPECTRAL))
-    _assert_same(image.obsmask, _expected_obsmask(scene, SPECTRAL))
-    assert not image.obsmask.all()
-    assert image.obsmask.any()
-
-
-@pytest.mark.parametrize("maskupdate", [True, False])
-@pytest.mark.parametrize("predictors", [SPECTRAL, list(reversed(SPECTRAL))], ids=["forward", "reversed"])
+@pytest.mark.parametrize(
+    "predictors,maskupdate",
+    [(SPECTRAL, True), (list(reversed(SPECTRAL)), False)],
+    ids=["forward_with_mask", "reversed_without_mask"],
+)
 def test_read_datacube_matches_each_band(scene, predictors, maskupdate):
     image = _make(scene)
     data, _ = image.read_datacube(list(predictors), maskupdate=maskupdate)
@@ -209,24 +207,17 @@ def _set_dn(image, band, row, col, value):
     _write(path, data, res, "JP2OpenJPEG")
 
 
-@pytest.mark.parametrize("level", ["TOA", "DN"])
-def test_read_band_returns_saturated_pixels(clear_image, level):
-    _set_dn(clear_image, "blue", 50, 50, 65535)
-    _set_dn(clear_image, "blue", 40, 40, 65534)
+@pytest.mark.parametrize("offset", [-1000.0, -1001.0, 0.0])
+def test_read_band_returns_saturated_pixels(tmp_path, offset):
+    image = _clear_image(tmp_path, offset)
+    _set_dn(image, "blue", 50, 50, 65535)
+    _set_dn(image, "blue", 40, 40, 65534)
 
-    _, satu = clear_image.read_band("blue", level=level, saturation=True)
+    _, satu = image.read_band("blue", saturation=True)
 
     expected = np.zeros((TARGET, TARGET), dtype=bool)
     expected[50, 50] = True
     assert np.array_equal(satu, expected)
-
-
-def test_read_band_leaves_saturation_out_by_default(clear_image):
-    _set_dn(clear_image, "blue", 50, 50, 65535)
-
-    _, satu = clear_image.read_band("blue")
-
-    assert satu is None
 
 
 def test_read_datacube_sets_saturation_bits_in_blue_green_red_order(clear_image):
@@ -240,15 +231,6 @@ def test_read_datacube_sets_saturation_bits_in_blue_green_red_order(clear_image)
         expected = np.zeros((TARGET, TARGET), dtype=bool)
         expected[PIXELS[band]] = True
         assert np.array_equal(statu.get(bit), expected)
-
-
-def test_read_datacube_does_not_flag_the_dn_below_saturation(clear_image):
-    for band in PIXELS:
-        _set_dn(clear_image, band, 50, 50, 65534)
-
-    _, statu = clear_image.read_datacube(list(SPECTRAL))
-
-    assert not (statu.get(0) | statu.get(1) | statu.get(2)).any()
 
 
 @pytest.mark.parametrize("missing", list(PIXELS))

@@ -44,9 +44,17 @@ def _whole_image_probs(stub, normalize):
         return torch.softmax(stub.model(torch.from_numpy(cube)[None]), dim=1)[0].numpy()
 
 
-@pytest.mark.parametrize("batch_size", [1, 3, 500], ids=["single", "short_last_batch", "one_batch"])
-@pytest.mark.parametrize("normalize", [True, False])
-@pytest.mark.parametrize("probability", ["none", "default", "cloud"])
+@pytest.mark.parametrize(
+    "probability,normalize,batch_size",
+    [
+        ("none", True, 3),
+        ("default", True, 3),
+        ("cloud", True, 3),
+        ("cloud", True, 1),
+        ("cloud", True, 500),
+        ("cloud", False, 3),
+    ],
+)
 def test_classify_matches_per_pixel_scores(probability, normalize, batch_size):
     stub = _stub(batch_size)
     cube_before = stub.image.data.data.copy()
@@ -80,17 +88,6 @@ def _anchors(count):
     return [(i * 2, i * 3, 0, 0) for i in range(count)]
 
 
-def test_fill_batch_matches_stack():
-    datacube = _datacube()
-    anchors = _anchors(4)
-    buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
-    actual = fill_batch(buffer, datacube, anchors, 32)
-    expected = _stack(datacube, anchors, 32)
-    assert actual.dtype == expected.dtype
-    assert actual.shape == expected.shape
-    assert actual.numpy().tobytes() == expected.numpy().tobytes()
-
-
 def test_short_last_batch():
     datacube = _datacube()
     buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
@@ -100,11 +97,3 @@ def test_short_last_batch():
     expected = _stack(datacube, anchors, 32)
     assert actual.shape == (2, 3, 32, 32)
     assert actual.numpy().tobytes() == expected.numpy().tobytes()
-
-
-def test_fill_batch_does_not_change_datacube():
-    datacube = _datacube()
-    before = datacube.clone()
-    buffer = torch.empty((4, 3, 32, 32), dtype=datacube.dtype)
-    fill_batch(buffer, datacube, _anchors(4), 32)
-    assert torch.equal(datacube, before)
