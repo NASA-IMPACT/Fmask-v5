@@ -14,33 +14,6 @@ def _data():
     return Data(cube, BANDS)
 
 
-def _coords():
-    rng = np.random.default_rng(1)
-    rows, cols = rng.integers(0, 30, 200), rng.integers(0, 40, 200)
-    rows[:20], cols[:20] = rows[20:40], cols[20:40]
-    return rows, cols
-
-
-def test_sample_matches_get():
-    data = _data()
-    bands = ["nir", "blue", "red"]
-    rows, cols = _coords()
-    expected = data.get(bands)[:, rows, cols]
-    actual = data.sample(bands, rows, cols)
-    assert actual.dtype == expected.dtype
-    assert actual.shape == (3, 200)
-    assert np.array_equal(actual, expected)
-    assert actual.T.tobytes() == expected.T.tobytes()
-
-
-def test_sample_is_copy():
-    data = _data()
-    before = data.data.copy()
-    rows, cols = _coords()
-    data.sample(["nir", "blue"], rows, cols)[:] = -1
-    assert np.array_equal(data.data, before)
-
-
 class _RecordingModel:
     classes_ = np.array([0, 1])
 

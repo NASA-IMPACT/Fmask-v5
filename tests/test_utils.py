@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from skimage.morphology import reconstruction
 
 from fmask import constant as C
 from fmask import utils
@@ -162,3 +163,50 @@ def test_predictor_order_matches_data_get():
         utils.normalize_bands(data.data, [data.bands.index(p) for p in predictors], obsmask=mask),
         _bands(data.get(predictors), obsmask=mask),
     )
+
+
+def _random(dtype, seed=0, shape=(40, 57)):
+    return np.random.default_rng(seed).random(shape).astype(dtype)
+
+
+@pytest.mark.parametrize("fill_value", [None, -1.0])
+@pytest.mark.parametrize("obs_shape", ["full", "partial", "single"])
+def test_imfill_matches_skimage(obs_shape, fill_value):
+    data = _random(np.float32, 11, (31, 37)) * 10
+    obsmask = np.ones(data.shape, dtype=bool)
+    if obs_shape == "partial":
+        obsmask[:5] = False
+        obsmask[:, -4:] = False
+    elif obs_shape == "single":
+        obsmask[:] = False
+        obsmask[15, 15] = True
+    max_val = data[obsmask].max()
+    filled_input = data.copy()
+    filled_input[~obsmask] = max_val if fill_value is None else fill_value
+    seed = filled_input.copy()
+    seed[1:-1, 1:-1] = max_val
+
+    result = utils.imfill(data, obsmask, fill_value=fill_value)
+
+    _assert_same(result, reconstruction(seed, filled_input, method="erosion"))
+    _assert_same(data, filled_input)
+
+
+def test_imfill_fills_a_closed_hole():
+    data = np.full((5, 5), 5.0, dtype=np.float32)
+    data[2, 2] = 1.0
+    result = utils.imfill(data, np.ones((5, 5), dtype=bool))
+    assert result[2, 2] == 5.0
+
+
+def test_imfill_keeps_a_depression_open_to_the_border():
+    data = np.full((5, 5), 5.0, dtype=np.float32)
+    data[2, :3] = 1.0
+    result = utils.imfill(data, np.ones((5, 5), dtype=bool))
+    assert (result[2, :3] == 1.0).all()
+
+
+def test_imfill_empty_observation_mask_raises():
+    data = _random(np.float32, 12, (8, 8))
+    with pytest.raises(ValueError):
+        utils.imfill(data, np.zeros(data.shape, dtype=bool))

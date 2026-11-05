@@ -22,6 +22,7 @@ SPECTRAL = [
     "wnir", "nir", "wv", "swir1", "swir2", "cirrus",
 ]
 OFFSETS = {name: -1000.0 - index for index, (name, _, _) in enumerate(BANDS)}
+PIXELS = {"blue": (50, 50), "green": (40, 40), "red": (30, 30)}
 QUANTIFICATION = 10000.0
 
 
@@ -36,27 +37,27 @@ def _write(path, data, res, driver):
         dst.write(data, 1)
 
 
-@pytest.fixture
-def scene(tmp_path):
+def _write_scene(folder, offsets, nodata_lines):
     rng = np.random.default_rng(0)
     for offset, (_, filename, res) in enumerate(BANDS):
         size = TARGET * RES // res
         data = rng.integers(1000, 12000, (size, size), dtype=np.uint16)
-        data[offset, :] = 0
-        data[:, offset] = 0
-        _write(tmp_path / f"{filename}.jp2", data, res, "JP2OpenJPEG")
-    reference = tmp_path / "reference.tif"
+        if nodata_lines:
+            data[offset, :] = 0
+            data[:, offset] = 0
+        _write(folder / f"{filename}.jp2", data, res, "JP2OpenJPEG")
+    reference = folder / "reference.tif"
     _write(reference, np.ones((TARGET, TARGET), dtype=np.uint16), RES, "GTiff")
     with rasterio.open(reference) as src:
         profile = src.meta.copy()
         profilefull = src
     return {
-        "folder": str(tmp_path),
+        "folder": str(folder),
         "bands": pandas.DataFrame(
             {
                 "NAME": [name for name, _, _ in BANDS],
                 "FILE": [filename for _, filename, _ in BANDS],
-                "RADIO_ADD_OFFSET": [OFFSETS[name] for name, _, _ in BANDS],
+                "RADIO_ADD_OFFSET": [offsets[name] for name, _, _ in BANDS],
                 "QUANTIFICATION_VALUE": [QUANTIFICATION] * len(BANDS),
             }
         ),
@@ -77,6 +78,17 @@ def _make(scene):
     image.lat_north = 0.0
     image.lat_south = 0.0
     return image
+
+
+@pytest.fixture
+def scene(tmp_path):
+    return _write_scene(tmp_path, OFFSETS, nodata_lines=True)
+
+
+@pytest.fixture(params=[-1000.0, -1001.0, 0.0], ids=["offset_1000", "offset_1001", "no_offset"])
+def clear_image(tmp_path, request):
+    offsets = {name: request.param for name, _, _ in BANDS}
+    return _make(_write_scene(tmp_path, offsets, nodata_lines=False))
 
 
 def _assert_same(actual, expected):
@@ -184,3 +196,74 @@ def test_read_datacube_replaces_nan_values(scene, monkeypatch):
     monkeypatch.setattr(Sentinel2, "_read_band_values", with_nan)
     data, _ = _make(scene).read_datacube(list(SPECTRAL))
     assert (data.data[:, 20, 20] == np.float32(C.EPS)).all()
+
+
+def _set_dn(image, band, row, col, value):
+    """Set one target pixel in the band file, covering every native pixel inside it."""
+    _, filename, res = next(entry for entry in BANDS if entry[0] == band.upper())
+    path = f"{image.folder}/{filename}.jp2"
+    with rasterio.open(path) as src:
+        data = src.read(1)
+    scale = RES // res
+    data[row * scale:(row + 1) * scale, col * scale:(col + 1) * scale] = value
+    _write(path, data, res, "JP2OpenJPEG")
+
+
+@pytest.mark.parametrize("level", ["TOA", "DN"])
+def test_read_band_returns_saturated_pixels(clear_image, level):
+    _set_dn(clear_image, "blue", 50, 50, 65535)
+    _set_dn(clear_image, "blue", 40, 40, 65534)
+
+    _, satu = clear_image.read_band("blue", level=level, saturation=True)
+
+    expected = np.zeros((TARGET, TARGET), dtype=bool)
+    expected[50, 50] = True
+    assert np.array_equal(satu, expected)
+
+
+def test_read_band_leaves_saturation_out_by_default(clear_image):
+    _set_dn(clear_image, "blue", 50, 50, 65535)
+
+    _, satu = clear_image.read_band("blue")
+
+    assert satu is None
+
+
+def test_read_datacube_sets_saturation_bits_in_blue_green_red_order(clear_image):
+    for band, (row, col) in PIXELS.items():
+        _set_dn(clear_image, band, row, col, 65535)
+
+    _, statu = clear_image.read_datacube(list(SPECTRAL))
+
+    assert statu.index == 2
+    for bit, band in enumerate(PIXELS):
+        expected = np.zeros((TARGET, TARGET), dtype=bool)
+        expected[PIXELS[band]] = True
+        assert np.array_equal(statu.get(bit), expected)
+
+
+def test_read_datacube_does_not_flag_the_dn_below_saturation(clear_image):
+    for band in PIXELS:
+        _set_dn(clear_image, band, 50, 50, 65534)
+
+    _, statu = clear_image.read_datacube(list(SPECTRAL))
+
+    assert not (statu.get(0) | statu.get(1) | statu.get(2)).any()
+
+
+@pytest.mark.parametrize("missing", list(PIXELS))
+def test_read_datacube_without_visible_band_raises(clear_image, missing):
+    predictors = [band for band in SPECTRAL if band != missing]
+    with pytest.raises(ValueError, match=missing):
+        clear_image.read_datacube(predictors)
+
+
+@pytest.mark.parametrize("band", list(PIXELS))
+def test_read_datacube_zeroes_whiteness_of_saturated_pixels(clear_image, band):
+    _set_dn(clear_image, band, 50, 50, 65535)
+
+    data, _ = clear_image.read_datacube(SPECTRAL + ["whiteness"])
+
+    expected_nonzero = np.ones((TARGET, TARGET), dtype=bool)
+    expected_nonzero[50, 50] = False
+    assert np.array_equal(data.data[data.bands.index("whiteness")] != 0, expected_nonzero)
