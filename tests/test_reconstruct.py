@@ -30,7 +30,7 @@ def _with_nan(dtype):
 
 def _signed_zeros(dtype):
     rng = np.random.default_rng(3)
-    mask = rng.integers(0, 3, (40, 57)).astype(dtype)
+    mask = rng.integers(-1, 3, (40, 57)).astype(dtype)
     mask[mask == 0] = rng.choice([-0.0, 0.0], size=int((mask == 0).sum()))
     return mask
 
