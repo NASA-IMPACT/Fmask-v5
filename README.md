@@ -1,3 +1,29 @@
+# Fmask (HLS fork)
+
+This is a fork of [GERSL/Fmask](https://github.com/GERSL/Fmask) maintained by
+the NASA Harmonized Landsat Sentinel-2 (HLS) team. It packages Fmask for
+installation with pip, uv, pixi, and conda, and carries fixes on top of the
+upstream release. The upstream documentation follows below.
+
+## Versioning
+
+Releases track the upstream Fmask version, with HLS maintenance releases
+tagged as [PEP 440 post-releases](https://peps.python.org/pep-0440/#post-releases)
+(e.g. `v5.0.1.post4` is the 4th maintenance release of upstream `5.0.1`).
+Commits after a tag get a development version such as
+`5.0.1.post5.dev2+g<hash>`.
+
+The package version is derived from git tags by `hatch-vcs`, so
+`importlib.metadata.version("fmask")` and `fmask.__version__` always match the
+tag. The conda recipe reads the same version from the `FMASK_VERSION`
+environment variable, which the `build-conda` task sets:
+
+```bash
+pixi run -e build build-conda
+```
+
+---
+
 # Fmask
 Fmask (Function of mask) is an automated algorithm for detecting clouds and cloud shadows in Landsat 4–9 (including 4, 5, 7, 8, and 9) and Sentinel-2 imagery ([Figure 1](#figure1)). **It processes Landsats 4-9 Collection 2 Level 1 imagery (Digital Number) and Sentinel-2 Level-1C imagery (Top Of Atmosphere reflectance).**
 
@@ -79,10 +105,10 @@ fmask = { path = "../fmask" }        # local clone
 To build the conda package manually (e.g. for distribution or CI):
 
 ```bash
-pixi build --path recipe/
+pixi run -e build build-conda
 ```
 
-This produces a `fmask-5.0.1-*.conda` artifact in the project root that can be
+This produces a `dist/noarch/fmask-<version>-*.conda` artifact that can be
 used as a local channel or attached to a release.
 
 ### Option 4 — complete ZIP (no git required)
