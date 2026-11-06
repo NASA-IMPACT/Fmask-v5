@@ -1,6 +1,5 @@
 [workspace]
 name = "fmask"
-version = "5.0.1"
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]
 preview = ["pixi-build"]
@@ -34,12 +33,22 @@ fmask = { path = ".", editable = true }
 [feature.test.dependencies]
 pytest = "*"
 
+[feature.build.dependencies]
+python = ">=3.10"
+rattler-build = "*"
+setuptools-scm = "*"
+
+[feature.build.tasks]
+build-conda = "FMASK_VERSION=$(python -m setuptools_scm) rattler-build build --experimental --recipe recipe/ --output-dir dist/ -c conda-forge"
+
 [environments]
 default = { solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
+build = { features = ["build"], no-default-feature = true }
 
 [package]
 name = "fmask"
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
+config = { experimental = true }

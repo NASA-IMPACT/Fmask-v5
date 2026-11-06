@@ -1,10 +1,14 @@
 import importlib as _importlib
+import importlib.metadata as _metadata
 import sys as _sys
 from importlib.machinery import ModuleSpec as _ModuleSpec
 
 from ._paths import FMASK_DATA_ENV, get_data_root
 
-__version__ = "5.0.1"
+try:
+    __version__ = _metadata.version("fmask")
+except _metadata.PackageNotFoundError:
+    __version__ = "0+unknown"
 
 # ---------------------------------------------------------------------------
 # Pickle compatibility
