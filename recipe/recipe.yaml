@@ -1,6 +1,9 @@
+context:
+  version: ${{ env.get("FMASK_VERSION") }}
+
 package:
   name: fmask
-  version: 5.0.1
+  version: ${{ version }}
 
 source:
   - path: ..
@@ -9,13 +12,17 @@ build:
   number: 0
   noarch: python
   script:
-    - ${{ PYTHON }} -m pip install --no-deps --no-build-isolation . -vv
+    env:
+      SETUPTOOLS_SCM_PRETEND_VERSION: ${{ version }}
+    content:
+      - ${{ PYTHON }} -m pip install --no-deps --no-build-isolation . -vv
 
 requirements:
   host:
     - python >=3.10
     - pip
     - hatchling
+    - hatch-vcs
   run:
     - python >=3.10
     - click
@@ -53,6 +60,7 @@ tests:
       - fmask --help
       - fmask-batch --help
       - fmask-data --help
+      - python -c "import importlib.metadata as m, fmask; assert m.version('fmask') == fmask.__version__ == '${{ version }}', fmask.__version__"
 
 about:
   homepage: https://github.com/gersl/fmask

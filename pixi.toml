@@ -33,9 +33,18 @@ fmask = { path = ".", editable = true }
 [feature.test.dependencies]
 pytest = "*"
 
+[feature.build.dependencies]
+python = ">=3.10"
+rattler-build = "*"
+setuptools-scm = "*"
+
+[feature.build.tasks]
+build-conda = "FMASK_VERSION=$(python -m setuptools_scm) rattler-build build --recipe recipe/ --output-dir dist/ -c conda-forge"
+
 [environments]
 default = { solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
+build = { features = ["build"], no-default-feature = true }
 
 [package]
 name = "fmask"
