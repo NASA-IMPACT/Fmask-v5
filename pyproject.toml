@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "fmask"
-version = "5.0.1"
+dynamic = ["version"]
 description = "Cloud and cloud shadow detection for Landsat 4-9 and Sentinel-2"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -33,6 +33,9 @@ dependencies = [
 fmask = "fmask.cli.fmask_single:main"
 fmask-batch = "fmask.cli.fmask_batch:main"
 fmask-data = "fmask.cli.data:main"
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fmask"]
