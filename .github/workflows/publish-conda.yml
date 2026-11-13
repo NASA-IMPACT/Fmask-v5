@@ -1,0 +1,66 @@
+name: Publish conda package
+
+# Releases publish to the "stable" channel. Pull requests publish to the "dev"
+# channel once a reviewer approves the "conda" environment deployment.
+on:
+  release:
+    types: [published]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  publish-stable:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # required for requesting the JWT (for OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-conda
+        with:
+          channel: stable
+          require-release-version: true
+          bucket: ${{ vars.CONDA_CHANNEL_BUCKET }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+  publish-dev:
+    # GitHub does not issue OIDC tokens to pull requests from forks
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: conda
+    permissions:
+      contents: read
+      id-token: write # required for requesting the JWT (for OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR head commit, not the merge commit, so the version's
+          # "+g<hash>" names a commit that exists on the branch
+          ref: ${{ github.event.pull_request.head.sha }}
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-conda
+        with:
+          channel: dev
+          bucket: ${{ vars.CONDA_CHANNEL_BUCKET }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
