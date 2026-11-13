@@ -916,19 +916,19 @@ class Sentinel2(Satellite):
         self.lon_center = np.rad2deg(
             np.arctan2(np.mean(np.sin(lon_rad_corners)), np.mean(np.cos(lon_rad_corners)))
         )
-    def read_band(
-        self, band, level="TOA", maskupdate=True, profile=False
-    ):  # sza=None is added for the compatibility with the Landsat
+    def read_band(self, band, level="TOA", sza=None, maskupdate=True, saturation = False, profile=False):
         """Reads a specific band from the satellite image.
 
         Args:
             band (str): The name of the band to read.
             level (str, optional): The level of the image data. Defaults to "TOA".
+            sza (2d array, optional): Not used, as the Sentinel-2 conversion to TOA needs no angle. Defaults to None.
             maskupdate (bool, optional): Whether to update the observation mask. Defaults to True.
+            saturation (bool, optional): Return the saturated layer of this band. Defaults to False.
             profile (bool, optional): Whether to append the profile of the geotiff. Defaults to False.
 
         Returns:
-            numpy.ndarray: The image data of the specified band.
+            tuple: The image data of the specified band, and its saturated pixels or None.
 
         Raises:
             IndexError: If the specified band is not found in the bands metadata.
@@ -960,6 +960,7 @@ class Sentinel2(Satellite):
                 image = src.read(
                     1, out_shape=self.profilefull.shape, resampling=Resampling.nearest
                 )  # only one band, and nearest is used to resample to smaller resolution
+        satu = image == self.saturation_index if saturation else None
         if maskupdate:
             # self.obsmask = np.logical_and(self.obsmask, image != src.nodata) # should be 0 when we test the Landsat Collection 2.
             if self.obsmask is None:  # initlize the mask of observation extent
@@ -978,9 +979,9 @@ class Sentinel2(Satellite):
 
         # return final result
         if level == "TOA":
-            return self.convert_dn_to_toa(band, image)
+            return self.convert_dn_to_toa(band, image), satu
         else:
-            return image
+            return image, satu
 
     def convert_dn_to_toa(self, band, data):
         """
@@ -1113,6 +1114,10 @@ class Sentinel2(Satellite):
                 - data (Data): The data cube containing the bands and their values.
                 - statu (numpy.ndarray): The saturation mask indicating the saturation status of the visible bands.
         """
+        for band in ("blue", "green", "red"):
+            if band not in predictors:
+                raise ValueError(f"{band} is required for the saturation layer")
+
         # init the bands with 3d dimensions
         bands = np.zeros(
             (len(predictors), self.profile["height"], self.profile["width"]),
@@ -1121,68 +1126,68 @@ class Sentinel2(Satellite):
         # Spectral bands
         predictor = "coastal"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "blue"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
+            bands[predictors.index(predictor), :, :], satu_blue = self.read_band(
+                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
             )
         predictor = "green"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
+            bands[predictors.index(predictor), :, :], satu_green = self.read_band(
+                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
             )
         predictor = "red"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
-                band=predictor, level="TOA", maskupdate=maskupdate
+            bands[predictors.index(predictor), :, :], satu_red = self.read_band(
+                band=predictor, level="TOA", maskupdate=maskupdate, saturation=True
             )
         predictor = "vre1"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "vre2"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "vre3"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
 
         predictor = "wnir"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "nir"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "wv"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "swir1"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "swir2"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
         predictor = "cirrus"
         if predictor in predictors:
-            bands[predictors.index(predictor), :, :] = self.read_band(
+            bands[predictors.index(predictor), :, :], _ = self.read_band(
                 band=predictor, level="TOA", maskupdate=maskupdate
             )
 
@@ -1198,9 +1203,10 @@ class Sentinel2(Satellite):
 
         # saturation for visible bands after the calculation of whiteness
         statu = BitLayer(bands.shape[1:])
-        statu.append(bands[predictors.index("blue"), :, :] == self.convert_dn_to_toa("blue", self.saturation_index))
-        statu.append(bands[predictors.index("green"), :, :] == self.convert_dn_to_toa("green", self.saturation_index))
-        statu.append(bands[predictors.index("red"), :, :] == self.convert_dn_to_toa("red", self.saturation_index))
+        statu.append(satu_blue)
+        statu.append(satu_green)
+        statu.append(satu_red)
+        del satu_blue, satu_green, satu_red
 
         predictor = "whiteness"
         if predictor in predictors:
