@@ -73,3 +73,34 @@ runs:
         pixi run --environment build rattler-build upload s3 \
           --channel "$CHANNEL" dist/noarch/*.conda
         pixi exec rattler-index s3 "$CHANNEL"
+
+    - name: Write job summary
+      shell: bash
+      env:
+        CHANNEL: s3://${{ inputs.bucket }}/${{ inputs.channel }}
+      run: |
+        set -euo pipefail
+        {
+          echo "### Published conda package"
+          echo
+          echo "Channel: \`$CHANNEL\`"
+          echo
+          echo "| Package | Version | Build | File |"
+          echo "| --- | --- | --- | --- |"
+          for f in dist/noarch/*.conda; do
+            # <name>-<version>-<build>.conda; names may contain dashes
+            base=$(basename "$f" .conda)
+            build=${base##*-}
+            rest=${base%-*}
+            version=${rest##*-}
+            name=${rest%-*}
+            echo "| \`$name\` | \`$version\` | \`$build\` | \`$(basename "$f")\` |"
+            pin="$name = \"=$version\""
+          done
+          echo
+          echo "pixi.toml, with \`$CHANNEL\` in the workspace channels:"
+          echo
+          echo '```toml'
+          echo "$pin"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
