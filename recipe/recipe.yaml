@@ -1,8 +1,11 @@
 context:
   # FMASK_VERSION is set by the build-conda task. Builds that do not set it
   # (e.g. pixi source dependencies) fall back to the latest git tag, which
-  # requires rattler-build's experimental mode.
-  version: ${{ env.get("FMASK_VERSION", default=git.latest_tag("..") | replace("v", "")) }}
+  # requires rattler-build's experimental mode. Commits after the tag get a
+  # "+g<hash>" suffix; rattler-build cannot count commits or detect a dirty tree.
+  git_tag: ${{ git.latest_tag("..") }}
+  git_suffix: ${{ "" if git.head_rev("..") == git.latest_tag_rev("..") else "+g" ~ git.head_rev("..")[:9] }}
+  version: ${{ env.get("FMASK_VERSION", default=(git_tag | replace("v", "")) ~ git_suffix) }}
 
 package:
   name: fmask
