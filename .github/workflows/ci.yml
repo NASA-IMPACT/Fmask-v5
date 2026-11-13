@@ -27,3 +27,20 @@ jobs:
           locked: true
       - name: Run pytest
         run: pixi run --environment test pytest
+
+  build-conda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@9936258fee697aff89b3fed6ca1f80a382ef694e # v0.11.3
+        with:
+          pixi-version: v0.83.0
+          environments: build
+          locked: true
+      - name: Build conda package
+        run: pixi run --environment build build-conda
