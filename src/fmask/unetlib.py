@@ -12,7 +12,7 @@ from torch import from_numpy
 from torch.utils.data import DataLoader, Dataset as BaseDataset
 import segmentation_models_pytorch as smp
 from pathlib import Path
-from .utils import normalize_datacube, init_patch_offanchors
+from .utils import normalize_bands, normalize_datacube, init_patch_offanchors
 import time
 from . import constant as C
 np.seterr(invalid='ignore') # ignore the invalid errors
@@ -157,6 +157,23 @@ class Dataset(BaseDataset):
 
     def __len__(self):
         return len(self.ids)
+
+
+def fill_batch(buffer, datacube, anchors, patch_size):
+    """Copy the datacube patches at the anchors into a buffer and return the filled part.
+
+    Args:
+        buffer (tensor): Reused tensor of (batch, channel, height, width), with room for all anchors.
+        datacube (tensor): The datacube of (channel, height, width).
+        anchors (list): The (row, column, _, _) of each patch.
+        patch_size (int): The height and width of a patch.
+
+    Returns:
+        tensor: The part of the buffer holding this batch.
+    """
+    for index, (row, col, _, _) in enumerate(anchors):
+        buffer[index] = datacube[:, row:row + patch_size, col:col + patch_size]
+    return buffer[: len(anchors)]
 
 
 class UNet(object):
@@ -547,9 +564,14 @@ class UNet(object):
         )
 
         # rescale the date cube
-        datacube = self.image.data.get(self.predictors)
         if normalize:
-            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask)
+            datacube = normalize_bands(
+                self.image.data.data,
+                [self.image.data.bands.index(predictor) for predictor in self.predictors],
+                obsmask=self.image.obsmask,
+            )
+        else:
+            datacube = self.image.data.get(self.predictors)
     
         if C.MSG_FULL:
             print(">>> classifying image by unet")
@@ -575,15 +597,19 @@ class UNet(object):
             image_prob = np.zeros((h, w), dtype=np.float32)
             image_prob_full = np.zeros((h, w), dtype=np.float32)
         self.model.eval()
-        
+
+        batch_buffer = torch.empty(
+            (min(self.batch_size, len(offanchors)), datacube.shape[0], self.patch_size, self.patch_size),
+            dtype=datacube.dtype,
+            device=datacube.device,
+        )
         for ibatch in range(0, len(offanchors), self.batch_size):
             # obtain the batch anchors
             batch_anchors = offanchors[ibatch : np.min((ibatch + self.batch_size, len(offanchors)))]  # maximum batch size
-            # obtain the batch tensor of the datacube
-            # batch_tensor = torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])
             # make the classification
-            with torch.no_grad(): # one line to finish the classification, in order to save the memory
-                batch_probs = torch.nn.functional.softmax(self.model(torch.stack([datacube[:, r:r+self.patch_size, c:c+self.patch_size] for r, c, _, _ in batch_anchors])), dim=1)
+            batch_tensor = fill_batch(batch_buffer, datacube, batch_anchors, self.patch_size)
+            with torch.inference_mode(): # one line to finish the classification, in order to save the memory
+                batch_probs = torch.nn.functional.softmax(self.model(batch_tensor), dim=1)
             # batch processing the class and prob layer
             if prob_index == -2: # -2 means the top class will be extracted by this model, but not the probability
                 _, batch_classes = batch_probs.topk(1, dim=1)  # top label with top prob.
@@ -686,168 +712,6 @@ class UNet(object):
             image_prob[missing_mask] = image_prob_full[missing_mask]
         return image_class, image_prob
     
-    def classify_backup(self, probability="none", normalize=True, shift=True) -> tuple:
-        """Classify the image by the model and return the class and probability
-
-        Args:
-            probability (srt, optional): One item of the classes, or "none" (means not to extract the prob layer), or "default" (highest score for the classified results). Defaults to "none".
-            normalize (bool, optional): Whether to normalize the datacube. Defaults to True.
-            shift (bool, optional): Whether to shift the patch off anchors. Defaults to True.
-        Returns:
-            image_class, image_prob: class result (0: noncloud, 1: cloud) and probability result
-        """
-        # check the probability index
-        prob_index = (
-            -1 if probability == "default" else
-            -2 if probability == "none" else
-            self.classes.index(probability)
-        )
-
-        # rescale the date cube
-        datacube = self.image.data.get(self.predictors)
-        if normalize:
-            datacube = normalize_datacube(datacube, obsmask=self.image.obsmask)
-    
-        if C.MSG_FULL:
-            print(">>> classifying image by unet")
-
-        # Convert the datacube to tensor if it is not
-        if not isinstance(datacube, torch.Tensor):
-            datacube = torch.from_numpy(datacube).to(
-                self.device, dtype=torch.float
-            )  # (batch, chanel, height, width)
-        datacube = torch.unsqueeze(
-            datacube, dim=0
-        )  # add one more dimension for the batch
-        offanchors = init_patch_offanchors(self.image.obsmask, size=self.patch_size, stride=self.patch_stride_classify, shift=shift)
-        # Change the r c off
-        wincut = int((self.patch_size - self.patch_stride_classify) / 2)
-   
-        # initlized image_class and image_prob
-
-        h, w = datacube.shape[2], datacube.shape[3]
-        image_class = np.full((h, w), 255, dtype=np.uint8) # 255 means no data, will be filled later using image_class_full
-        image_class_full = np.zeros((h, w), dtype=np.uint8)
-        if prob_index == -2:
-            image_prob = None  # no need to initialize
-        else:
-            image_prob = np.zeros((h, w), dtype=np.float32)
-            image_prob_full = np.zeros((h, w), dtype=np.float32)
-        self.model.eval()
-        with torch.no_grad():  # disabled gradient calculation
-            for offanchor in offanchors:
-                r_off, c_off = offanchor[0], offanchor[1]
-                # classify the pacth
-                patchprob = torch.nn.functional.softmax(
-                    self.model(
-                        datacube[
-                            :,
-                            :,
-                            r_off : r_off + self.patch_size,
-                            c_off : c_off + self.patch_size,
-                        ]
-                    ),
-                    dim=1,
-                )
-
-                # extract the prob and class
-                if (
-                    prob_index >= 0
-                ):  # prob_class_index is the index of the class that we want to extract the probability
-                    _, patchclass = patchprob.topk(
-                        1, dim=1
-                    )  # top label with top prob.
-                    # select the prob of the defined class and index based on the classes, but keep same shape
-                    patchprob = patchprob[:, prob_index, :, :].to("cpu").numpy()
-                    # patchprob = patchprob.to("cpu").numpy()
-                    image_class[
-                        r_off + wincut: r_off + self.patch_size - wincut, c_off + wincut: c_off + self.patch_size - wincut
-                    ] = patchclass[
-                        0,
-                        0,
-                        wincut: self.patch_size - wincut,
-                        wincut: self.patch_size - wincut,
-                    ]
-                    image_class_full[
-                        r_off : r_off + self.patch_size, c_off : c_off + self.patch_size
-                    ] = patchclass[
-                        0,
-                        0,
-                        :,
-                        :
-                    ]
-                    image_prob[
-                        r_off + wincut: r_off + self.patch_size - wincut, c_off + wincut: c_off + self.patch_size - wincut
-                    ] = patchprob[
-                        0,
-                        0,
-                        wincut: self.patch_size - wincut,
-                        wincut: self.patch_size - wincut,
-                    ]
-                    image_prob_full[
-                        r_off: r_off + self.patch_size, c_off: c_off + self.patch_size
-                    ] = patchprob[
-                        0,
-                        0,
-                        :,
-                        :
-                    ]
-                elif (
-                    prob_index == -1
-                ):  # -1 means only the predicted class will be extracted by this model
-                    patchprob, patchclass = patchprob.topk(
-                        1, dim=1
-                    ).to("cpu").numpy()  # top label with top prob.
-                    # patchprob = patchprob.to("cpu").numpy()
-                    image_prob[
-                        r_off + wincut: r_off + self.patch_size - wincut, c_off + wincut: c_off + self.patch_size - wincut
-                    ] = patchprob[
-                        0,
-                        0,
-                        wincut: self.patch_size - wincut,
-                        wincut: self.patch_size - wincut,
-                    ]
-                    image_prob_full[
-                        r_off: r_off + self.patch_size, c_off: c_off + self.patch_size
-                    ] = patchprob[
-                        0,
-                        0,
-                        :,
-                        :
-                    ]
-                elif (
-                    prob_index == -2
-                ):  # -2 means the top class will be extracted by this model, but not the probability
-                    _, patchclass = patchprob.topk(
-                        1, dim=1
-                    )  # top label with top prob.
-
-                    # which will be extracted all the time
-                    patchclass = patchclass.to("cpu").numpy()
-                    image_class[
-                        r_off + wincut: r_off + self.patch_size - wincut, c_off + wincut: c_off + self.patch_size - wincut
-                    ] = patchclass[
-                        0,
-                        0,
-                        wincut: self.patch_size - wincut,
-                        wincut: self.patch_size - wincut,
-                    ]
-                    image_class_full[
-                        r_off : r_off + self.patch_size, c_off : c_off + self.patch_size
-                    ] = patchclass[
-                        0,
-                        0,
-                        :,
-                        :
-                    ]
-        # fill the 255
-        # Fill missing values from full map
-        missing_mask = (image_class == 255)
-        image_class[missing_mask] = image_class_full[missing_mask]
-        if image_prob is not None:
-            image_prob[missing_mask] = image_prob_full[missing_mask]
-        return image_class, image_prob
-
     def check_device(self) -> None:
         """examine device, CPU or GPU
 
