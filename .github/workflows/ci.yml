@@ -1,13 +1,22 @@
 name: CI
 
+# Every run tests. Conda packages are built and published only after the tests pass:
+# - Every pull request builds the package.
+# - Pull requests from this repo then publish to the "dev" channel once a reviewer
+#   approves the "conda" environment deployment.
+# - Pushes to main publish to the "dev" channel.
+# - Published releases publish to the "stable" channel.
 on:
   pull_request:
   push:
     branches: [main]
+  release:
+    types: [published]
 
 permissions:
   contents: read
 
+# Only pull requests cancel in-progress runs, so a publish is never interrupted mid-upload
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -29,11 +38,16 @@ jobs:
         run: pixi run --environment test pytest
 
   build-conda:
+    needs: test
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The PR head commit, not the merge commit, so the version's
+          # "+g<hash>" names a commit that exists on the branch
+          ref: ${{ github.event.pull_request.head.sha }}
           # setuptools-scm derives the package version from the git tags
           fetch-depth: 0
           persist-credentials: false
@@ -44,3 +58,76 @@ jobs:
           locked: true
       - name: Build conda package
         run: pixi run --environment build build-conda
+
+  publish-dev-pr:
+    needs: build-conda
+    # Fork and Dependabot pull requests do not get an OIDC token
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: conda
+    permissions:
+      contents: read
+      id-token: write # required for requesting the JWT (for OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-conda
+        with:
+          channel: dev
+          bucket: ${{ vars.CONDA_CHANNEL_BUCKET }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+  publish-dev-main:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # required for requesting the JWT (for OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-conda
+        with:
+          channel: dev
+          bucket: ${{ vars.CONDA_CHANNEL_BUCKET }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+  publish-stable:
+    needs: test
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # required for requesting the JWT (for OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools-scm derives the package version from the git tags
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-conda
+        with:
+          channel: stable
+          require-release-version: true
+          bucket: ${{ vars.CONDA_CHANNEL_BUCKET }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
